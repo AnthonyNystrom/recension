@@ -50,7 +50,15 @@ from recension import (
 )
 
 artifact = TextArtifact.from_text("Label the sentiment of the message.")
-evalset = EvalSet.from_jsonl("examples.jsonl")  # records carry a "split" field
+
+# Held-out examples, split into train (for diagnosis) and validation (for
+# acceptance). Load from a JSONL file with EvalSet.from_jsonl(path) instead.
+evalset = EvalSet.from_records([
+    {"id": "t1", "input": "Absolutely love this", "expected": "positive", "split": "train"},
+    {"id": "t2", "input": "Broke after a day", "expected": "negative", "split": "train"},
+    {"id": "v1", "input": "Terrible support", "expected": "negative", "split": "validation"},
+    {"id": "v2", "input": "Exceeded expectations", "expected": "positive", "split": "validation"},
+])
 
 optimizer = ReflectiveOptimizer(
     artifact=artifact,
@@ -83,6 +91,8 @@ recension run --config run.yaml      # execute an optimization, write the record
 recension show run_record.json       # baseline, accepted diffs, score progression
 recension diff run_record.json vA vB # diff between two artifact versions
 ```
+
+A runnable, fully commented config and dataset live in [`examples/cli/`](examples/cli) (`recension run --config examples/cli/run.yaml`); the config schema is documented in the [CLI guide](https://anthonynystrom.github.io/recension/cli/).
 
 ## Documentation
 

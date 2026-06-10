@@ -18,6 +18,10 @@ site/
 docs/examples/generated/
 examples/output/
 
+# Run records written by the CLI / examples
+run_record.json
+optimized_prompt.txt
+
 # Internal build/spec/maintainer docs, kept local, not published (end-user markdown only)
 CLAUDE.md
 recension_PRD.md

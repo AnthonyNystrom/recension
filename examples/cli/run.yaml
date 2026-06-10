@@ -1,0 +1,48 @@
+# Example configuration for the recension CLI:
+#
+#   recension run --config examples/cli/run.yaml
+#
+# Every key the CLI understands is shown; optional keys note their defaults.
+# Run it from the repo root so the relative evalset path resolves.
+
+# The text artifact to optimize. Use `text:` for inline text, or `path:` to
+# load it from a file. `name` is optional (defaults to "artifact", or the file
+# stem when using `path`).
+artifact:
+  text: "Label the sentiment of the message."
+  name: sentiment-prompt
+
+# Held-out examples as a JSONL file. Each record needs `id`, `input`, and
+# `split` ("train" or "validation"). `expected` is required by exact_match and
+# f1; `rubric` is required by llm_judge.
+evalset:
+  path: examples/cli/data.jsonl
+
+# How outputs are scored. `name` is one of: exact_match | f1 | llm_judge.
+#   exact_match  - optional `case_sensitive: false`
+#   f1           - token-level F1, no extra options
+#   llm_judge    - optional `rubric: "..."`; the model below does the grading
+objective:
+  name: exact_match
+
+# The frozen model. `backend` is `mock` (offline, deterministic, no API key) or
+# `anthropic` (needs the [anthropic] extra and ANTHROPIC_API_KEY in the
+# environment; the key is read from the environment only, never from this file).
+model:
+  backend: mock
+  seed: 0                    # mock only: makes the deterministic mock reproducible
+  # model: claude-opus-4-8   # anthropic only: the model id
+
+# Update-time compute. All optional; defaults shown.
+budget:
+  candidates_per_round: 4
+  rounds: 3
+  diagnosis_depth: 1
+  max_model_calls: 200       # hard ceiling across all calls; omit for unlimited
+
+seed: 7                       # optional: makes the whole run reproducible against the mock
+min_improvement: 0.000001     # optional: margin a candidate must beat the incumbent by (default 1e-6)
+strict_leakage: false         # optional: raise on a leakage-flagged winner instead of accepting it
+
+output: run_record.json       # where to write the audit record
+# write_artifact: optimized_prompt.txt   # optional: also write the final artifact text
