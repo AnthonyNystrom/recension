@@ -1,0 +1,63 @@
+site_name: recension
+site_description: >-
+  Measured optimization of the text layer around a language model: versioned
+  artifacts, held-out evaluation, leakage detection, and a complete audit record.
+site_url: https://anthonynystrom.github.io/recension/
+repo_url: https://github.com/AnthonyNystrom/recension
+repo_name: AnthonyNystrom/recension
+
+theme:
+  name: material
+  logo: assets/recension-mark-light.svg
+  favicon: assets/recension-icon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+# Regenerate the example pages from real offline runs before every build, so a
+# bare `mkdocs build` works on a fresh clone (the pages are not committed).
+hooks:
+  - mkdocs_hooks.py
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            members_order: source
+            show_source: true
+            show_root_heading: true
+            separate_signature: true
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Use cases: use-cases.md
+  - Concepts: concepts.md
+  - Examples:
+      - Overview: examples/index.md
+      - Classification prompt: examples/generated/classification.md
+      - Context template: examples/generated/context_template.md
+      - Skill / instruction file: examples/generated/skill_file.md
+  - API reference: api.md

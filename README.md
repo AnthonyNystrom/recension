@@ -1,0 +1,93 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/recension-logo-dark.svg">
+    <img src="docs/assets/recension-logo.svg" alt="recension" width="340">
+  </picture>
+</p>
+
+# recension
+
+Measured optimization of the text layer around a language model (prompts, context templates, skill and instruction files) with the rigor normally reserved for weight training: a held-out objective, a baseline, versioned artifacts, and a complete audit trail.
+
+The name comes from textual criticism. A *recension* is the revision of a text by collating variant readings and keeping the best-supported one. That is the loop this library runs: propose multiple candidate edits, test each against held-out evidence, commit only what measurably improves, and record why.
+
+## Why
+
+The usual way to improve a prompt is to edit it, eyeball a few outputs, and ship. There is no held-out measurement, no record of why a change was made, and no defense against overfitting to the handful of cases you inspected. `recension` replaces that loop with a measured one:
+
+- **No edit is accepted without a held-out score that beats the incumbent.** Failures are diagnosed on a train split; acceptance happens only on a validation split.
+- **Every accepted version carries provenance**: the failures that motivated it, the diagnosis, every sibling candidate considered (with scores), and the diff. A reviewer who didn't run the optimization can reconstruct every decision.
+- **Leakage is checked, not assumed away.** Heuristics flag candidates that embed validation content or show implausible validation gains.
+- **Compute is a dial.** Candidates per round, rounds, diagnosis depth, and a hard ceiling on model calls are all caller-controlled.
+
+## Real-world use cases
+
+- **Production classification and extraction** (support-ticket triage, invoice fields, moderation): improve a labeling prompt on labeled data with measured, regression-safe edits.
+- **RAG context templates**: tune how retrieved chunks are assembled into the prompt with the model held fixed, so the metric move is attributable to the text.
+- **Agent and skill instructions**: optimize longer instruction files judged by an `LLMJudge` rubric when there is no gold answer.
+- **Governance and audit**: ship a replayable `RunRecord` for every prompt change, with leakage checks that stop overfit "wins."
+
+Full write-ups, plus a "how it works" walkthrough, are on the [documentation site](https://anthonynystrom.github.io/recension/).
+
+## Prior art, honestly
+
+DSPy and GEPA own the optimization mechanics this library's `ReflectiveOptimizer` performs; if you want state-of-the-art prompt optimization algorithms, look there. `recension`'s contribution is the **measurement and governance shell** around a text artifact: versioned artifacts with provenance, leakage detection, the complete audit record, and budgeted update-time compute. The design leaves room to delegate the optimizer internals to an external engine without changing the artifact and record abstractions.
+
+## Install
+
+```bash
+pip install recension              # core: zero provider dependencies
+pip install "recension[anthropic]" # adds the Anthropic backend
+```
+
+Python 3.12+. The core (and the whole test suite) runs against a deterministic `MockModel` with no API key and no network.
+
+## Quickstart
+
+```python
+from recension import (
+    Budget, EvalSet, ExactMatch, MockModel, ReflectiveOptimizer, TextArtifact,
+)
+
+artifact = TextArtifact.from_text("Label the sentiment of the message.")
+evalset = EvalSet.from_jsonl("examples.jsonl")  # records carry a "split" field
+
+optimizer = ReflectiveOptimizer(
+    artifact=artifact,
+    evalset=evalset,
+    objective=ExactMatch(),
+    model=MockModel(),          # offline mock; see below for the real backend
+    budget=Budget(candidates_per_round=4, rounds=3, max_model_calls=200),
+    seed=7,
+)
+record = optimizer.run()
+
+print(record.summary())         # baseline → accepted versions → final score
+record.save("run_record.json")  # the complete audit artifact
+```
+
+To run against a real model, install the extra (`pip install "recension[anthropic]"`), set `ANTHROPIC_API_KEY` in your environment, and use the Anthropic backend:
+
+```python
+from recension.models.anthropic import AnthropicModel  # kept off the top-level import so the core needs no provider deps
+
+optimizer = ReflectiveOptimizer(..., model=AnthropicModel())
+```
+
+API keys are read from the environment only, never from code or config.
+
+## CLI
+
+```bash
+recension run --config run.yaml      # execute an optimization, write the record
+recension show run_record.json       # baseline, accepted diffs, score progression
+recension diff run_record.json vA vB # diff between two artifact versions
+```
+
+## Documentation
+
+Full docs, API reference, and three worked examples (each reproducible offline against `MockModel`): **https://anthonynystrom.github.io/recension/**
+
+## License
+
+MIT

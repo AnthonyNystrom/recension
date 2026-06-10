@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>recension live demo</title>
+<style>
+  :root {
+    --bg: #1a1726; --panel: #221d33; --ink: #ece9f5; --muted: #a79fc0;
+    --accent: #9b7bd4; --accent-dim: #6d5aa0; --line: #36304a;
+    --good: #5ec98a; --bad: #d98b8b; --flag: #e0b24c;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header { padding: 2.4rem 1.5rem 1.2rem; max-width: 980px; margin: 0 auto; }
+  h1 { margin: 0 0 .3rem; font-size: 1.9rem; letter-spacing: -.01em; }
+  h1 span { color: var(--accent); }
+  .lede { color: var(--muted); max-width: 64ch; margin: 0; }
+  .why { color: var(--muted); max-width: 70ch; margin: .9rem 0 0; font-size: .93rem; }
+  .why b { color: var(--ink); }
+  .loop { color: var(--muted); font-size: .92rem; margin-top: .7rem; }
+  .loop b { color: var(--ink); }
+  .usecases { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .35rem .9rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .usecases li { color: var(--muted); font-size: .86rem; border-left: 2px solid var(--accent-dim); padding-left: .6rem; }
+  .usecases b { color: var(--ink); }
+  .pick { color: var(--muted); font-size: .9rem; margin: .4rem 0 0; }
+  main { max-width: 980px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+  .cards { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin: 1.4rem 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; display: flex; flex-direction: column; }
+  .card h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
+  .card p { margin: 0 0 .9rem; color: var(--muted); font-size: .9rem; flex: 1; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 8px; padding: .5rem .9rem; background: var(--accent); color: #15101f; font-weight: 600; transition: background .15s; }
+  button:hover { background: #b095e0; }
+  button:disabled { background: var(--accent-dim); color: #cfc6e6; cursor: progress; }
+  .run-area { display: none; margin-top: 1.6rem; }
+  .run-area.active { display: block; }
+  .run-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  .run-head h2 { margin: 0; font-size: 1.3rem; }
+  .badge { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--flag); border: 1px solid var(--flag); border-radius: 99px; padding: .08rem .55rem; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
+  .panel h4 { margin: 0 0 .6rem; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  #log { font-family: var(--mono); font-size: .82rem; white-space: pre-wrap; color: var(--muted); max-height: 240px; overflow-y: auto; margin: 0; }
+  #log .new { color: var(--ink); }
+  table { width: 100%; border-collapse: collapse; font-size: .87rem; }
+  th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .76rem; text-transform: uppercase; letter-spacing: .04em; }
+  td.mono { font-family: var(--mono); }
+  .tag { font-size: .72rem; border-radius: 99px; padding: .05rem .5rem; font-weight: 600; }
+  .tag.acc { background: rgba(94,201,138,.16); color: var(--good); }
+  .tag.rej { background: rgba(167,159,192,.14); color: var(--muted); }
+  .flagcell { color: var(--flag); font-size: .8rem; }
+  .round { margin-bottom: 1rem; }
+  .round > .panel { margin-bottom: .5rem; }
+  .diag { color: var(--ink); }
+  pre.diff { font-family: var(--mono); font-size: .8rem; background: #15111f; border: 1px solid var(--line); border-radius: 8px; padding: .7rem .8rem; overflow-x: auto; margin: .6rem 0 0; }
+  pre.diff .add { color: var(--good); }
+  pre.diff .del { color: var(--bad); }
+  pre.diff .hdr { color: var(--muted); }
+  .scoreline { font-size: 1.05rem; }
+  .scoreline b { color: var(--accent); }
+  .arrow { color: var(--muted); }
+  a { color: var(--accent); }
+  footer { color: var(--muted); font-size: .82rem; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>recension</span> live demo</h1>
+  <p class="lede">Watch the library optimize a text artifact against held-out evidence. Each run is the
+  real propose/test/accept loop against the deterministic offline mock: no API key, fully reproducible.</p>
+  <p class="why">The usual way to improve a prompt is to edit it, eyeball a few outputs, and ship.
+  Nothing measures whether the edit helped, nothing records why it was made, and nothing stops it from
+  overfitting to the cases you happened to inspect. <b>recension</b> treats a prompt as a production
+  artifact: it accepts an edit only when it beats the incumbent on held-out data, checks the gain
+  wasn't bought by memorizing that data, and records every decision so a reviewer can replay it.</p>
+  <p class="loop"><b>Propose</b> candidate edits from diagnosed failures <span class="arrow">→</span>
+  <b>collate</b> by scoring each on a held-out split <span class="arrow">→</span>
+  <b>commit</b> only what measurably beats the incumbent, with provenance.</p>
+  <ul class="usecases">
+    <li><b>Classification &amp; extraction</b>: support-ticket triage, invoice fields, moderation</li>
+    <li><b>RAG context templates</b>: tune how chunks are assembled, model held fixed</li>
+    <li><b>Agent &amp; skill instructions</b>: longer files judged by a rubric</li>
+    <li><b>Governance &amp; audit</b>: a replayable record of why every prompt changed</li>
+  </ul>
+</header>
+<main>
+  <p class="pick">Pick a scenario and run it. Each is a small, real instance of the use cases above.</p>
+  <div class="cards">
+    {% for name, (title, _module, blurb) in examples.items() %}
+    <div class="card">
+      <h3>{{ title }}</h3>
+      <p>{{ blurb }}</p>
+      <div><button data-name="{{ name }}" data-title="{{ title }}">Run optimization →</button></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <section id="run" class="run-area">
+    <div class="run-head">
+      <h2 id="run-title"></h2>
+      <span id="graded-badge" class="badge" hidden>model-graded</span>
+    </div>
+    <div class="panel">
+      <h4>Live progress</h4>
+      <pre id="log"></pre>
+    </div>
+    <div id="result"></div>
+  </section>
+
+  <footer>
+    Static rendered versions of these runs (and the API reference) live in the
+    <a href="https://anthonynystrom.github.io/recension/">documentation site</a>.
+  </footer>
+</main>
+
+<script>
+const fmt = (x) => (x === null || x === undefined) ? "n/a" : Number(x).toFixed(4);
+
+function renderDiff(diff) {
+  if (!diff) return "";
+  const lines = diff.split("\n").map((l) => {
+    const e = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    if (l.startsWith("+")) return `<span class="add">${e}</span>`;
+    if (l.startsWith("-")) return `<span class="del">${e}</span>`;
+    if (l.startsWith("@@") || l.startsWith("---") || l.startsWith("+++")) return `<span class="hdr">${e}</span>`;
+    return e;
+  });
+  return `<pre class="diff">${lines.join("\n")}</pre>`;
+}
+
+function renderRecord(rec) {
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let html = `<div class="panel"><h4>Baseline</h4>
+    <div>Version <span class="mono">${esc(rec.baseline_version_id)}</span> ·
+    validation score <b>${fmt(rec.baseline_score)}</b></div></div>`;
+
+  for (const r of rec.rounds) {
+    html += `<div class="round"><div class="panel"><h4>Round ${r.round_index}</h4>
+      <div style="margin-bottom:.6rem">Train score ${fmt(r.train_score)} · failures analyzed:
+      ${r.failure_example_ids.length ? r.failure_example_ids.map((i) => `<span class="mono">${esc(i)}</span>`).join(", ") : "none"}</div>
+      <div class="diag"><b>Diagnosis:</b> ${esc(r.diagnosis)}</div>
+      <table><thead><tr><th>Candidate</th><th>Validation</th><th>Leakage flags</th><th>Outcome</th></tr></thead><tbody>`;
+    for (const c of r.candidates) {
+      const flags = c.leakage_flags.length
+        ? `<span class="flagcell">${c.leakage_flags.map(esc).join("; ")}</span>` : "none";
+      const tag = c.accepted ? `<span class="tag acc">accepted</span>` : `<span class="tag rej">rejected</span>`;
+      html += `<tr><td class="mono">${esc(c.candidate_id)}</td><td>${fmt(c.validation_score)}</td><td>${flags}</td><td>${tag}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+    const accepted = r.candidates.find((c) => c.accepted);
+    if (accepted) {
+      html += `<div style="margin-top:.7rem">New incumbent: version
+        <span class="mono">${esc(r.accepted_version_id)}</span></div>${renderDiff(accepted.diff)}`;
+    } else {
+      html += `<div style="margin-top:.7rem;color:var(--muted)">No candidate beat the incumbent this round.</div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  html += `<div class="panel"><h4>Result</h4>
+    <div class="scoreline">${fmt(rec.baseline_score)} <span class="arrow">→</span> <b>${fmt(rec.final_score)}</b></div>
+    <div style="color:var(--muted);margin-top:.3rem">${esc(rec.stopped_reason)} ·
+    ${rec.total_model_calls} model calls · objective <span class="mono">${esc(rec.objective_name)}</span></div></div>`;
+  return html;
+}
+
+let source = null;
+const logEl = document.getElementById("log");
+const resultEl = document.getElementById("result");
+const runArea = document.getElementById("run");
+const runTitle = document.getElementById("run-title");
+const gradedBadge = document.getElementById("graded-badge");
+
+function appendLog(line) {
+  const span = document.createElement("span");
+  span.textContent = line + "\n";
+  span.className = "new";
+  setTimeout(() => span.classList.remove("new"), 600);
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+for (const btn of document.querySelectorAll("button[data-name]")) {
+  btn.addEventListener("click", () => {
+    if (source) source.close();
+    document.querySelectorAll("button[data-name]").forEach((b) => (b.disabled = false));
+    btn.disabled = true;
+    runArea.classList.add("active");
+    runTitle.textContent = btn.dataset.title;
+    gradedBadge.hidden = true;
+    logEl.textContent = "";
+    resultEl.innerHTML = "";
+    runArea.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    source = new EventSource(`/run/${btn.dataset.name}`);
+    source.addEventListener("log", (e) => appendLog(JSON.parse(e.data)));
+    source.addEventListener("error", (e) => {
+      try { appendLog("ERROR: " + JSON.parse(e.data)); } catch (_) {}
+    });
+    source.addEventListener("record", (e) => {
+      const rec = JSON.parse(e.data);
+      if (rec.model_graded) gradedBadge.hidden = false;
+      resultEl.innerHTML = renderRecord(rec);
+    });
+    source.addEventListener("done", () => {
+      if (source) source.close();
+      source = null;
+      btn.disabled = false;
+    });
+  });
+}
+</script>
+</body>
+</html>

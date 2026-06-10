@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Docs / examples build output (regenerated, never committed)
+site/
+docs/examples/generated/
+examples/output/
+
+# Internal build/spec/maintainer docs, kept local, not published (end-user markdown only)
+CLAUDE.md
+recension_PRD.md
+RELEASING.md
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

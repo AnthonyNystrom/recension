@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 88 88" role="img" aria-label="recension">
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c5fb8"/>
+      <stop offset="1" stop-color="#523f86"/>
+    </linearGradient>
+  </defs>
+  <rect width="88" height="88" rx="20" fill="url(#badge)"/>
+  <g fill="none" stroke="#efeaf9" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" opacity="0.92">
+    <path d="M30 27 L21 44 L30 61"/>
+    <path d="M58 27 L67 44 L58 61"/>
+  </g>
+  <rect x="33" y="33" width="22" height="4.5" rx="2.25" fill="#ffffff" opacity="0.4"/>
+  <rect x="30" y="41.75" width="28" height="5" rx="2.5" fill="#ffffff"/>
+  <rect x="33" y="50.5" width="18" height="4.5" rx="2.25" fill="#ffffff" opacity="0.4"/>
+</svg>

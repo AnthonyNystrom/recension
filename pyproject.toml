@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "recension"
+version = "0.1.0"
+description = "Measured optimization of the text layer around a language model: versioned artifacts, held-out evaluation, leakage detection, and a complete audit record."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Anthony Nyström", email = "nystrom.anthony@gmail.com" }]
+keywords = ["prompt-optimization", "llm", "evaluation", "provenance", "auditability"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+# DESIGN NOTE: PyYAML is the single runtime dependency, required only because the
+# PRD specifies YAML config files for the CLI. Everything else is stdlib.
+dependencies = ["pyyaml>=6.0"]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.13",
+    "ruff>=0.8",
+    "build>=1.2",
+    "twine>=5.0",
+    "types-PyYAML",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+]
+# DESIGN NOTE: Flask powers only the optional `examples/webapp` live demo; it is
+# never imported by the library, so it stays out of the core and docs groups.
+webapp = ["flask>=3.0"]
+
+[project.scripts]
+recension = "recension.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/AnthonyNystrom/recension"
+Documentation = "https://anthonynystrom.github.io/recension/"
+Repository = "https://github.com/AnthonyNystrom/recension"
+Changelog = "https://github.com/AnthonyNystrom/recension/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["recension"]
+
+[tool.hatch.build.targets.sdist]
+include = ["recension", "tests", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["recension", "tests"]
+
+[[tool.mypy.overrides]]
+module = "anthropic.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
