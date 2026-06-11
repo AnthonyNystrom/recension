@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/recension-logo-dark.svg">
-    <img src="docs/assets/recension-logo.svg" alt="recension" width="340">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AnthonyNystrom/recension/main/docs/assets/recension-logo-dark.png">
+    <img src="https://raw.githubusercontent.com/AnthonyNystrom/recension/main/docs/assets/recension-logo.png" alt="recension" width="340">
   </picture>
 </p>
 

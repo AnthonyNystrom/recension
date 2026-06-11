@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-06-11
+
+### Fixed
+
+- README logo now uses absolute raw-GitHub PNG URLs instead of relative SVG paths, so it renders on
+  the PyPI project page (PyPI does not resolve relative links or display SVG images). No code changes.
+
 ## [0.6.0] - 2026-06-11
 
 More model providers. The core stays provider-agnostic; each hosted backend is an optional extra and
