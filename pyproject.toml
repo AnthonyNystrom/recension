@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "recension"
-version = "0.5.0"
+version = "0.6.0"
 description = "Measured optimization of the text layer around a language model: versioned artifacts, held-out evaluation, leakage detection, and a complete audit record."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -30,6 +30,8 @@ dependencies = ["pyyaml>=6.0"]
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
+openai = ["openai>=1.0"]
+gemini = ["google-genai>=1.0"]
 dev = [
     "pytest>=8.0",
     "mypy>=1.13",
@@ -75,7 +77,7 @@ python_version = "3.12"
 files = ["recension", "tests"]
 
 [[tool.mypy.overrides]]
-module = "anthropic.*"
+module = ["anthropic.*", "openai.*", "google.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

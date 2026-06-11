@@ -50,6 +50,12 @@ Generated from the package docstrings.
 
 ::: recension.models.anthropic
 
+::: recension.models.openai
+
+::: recension.models.gemini
+
+::: recension.models.ollama
+
 ## Exceptions
 
 ::: recension.exceptions

@@ -71,6 +71,17 @@ baseline, then for each round:
 The model is held fixed the entire time. Only the text changes, which is what lets you attribute a
 metric move to the text layer rather than to the model.
 
+### Models and providers
+
+The optimizer never imports a provider; it talks to anything satisfying the small
+[`Model`](api.md#recension.models.base.Model) protocol (`complete(messages, ...) -> str`, plus a call
+count, and an optional `last_usage` for the cost ledger). Backends ship for **Anthropic**, **OpenAI**
+(and OpenAI-compatible servers such as vLLM or LM Studio via `base_url`), **Google Gemini**, and
+**Ollama** (local models, no extra dependency); each hosted one is an optional extra and reads its key
+from the environment only. Bringing your own is a small adapter, and `MockModel` is a worked template.
+Determinism, though, is a guarantee of `MockModel` alone: hosted APIs treat `seed` as a best-effort
+hint or ignore it, so cross-provider runs are not bit-reproducible the way the offline tests are.
+
 ### Significance, not just an epsilon
 
 On a small validation set, a candidate can clear `min_improvement` purely by noise (one example flips).

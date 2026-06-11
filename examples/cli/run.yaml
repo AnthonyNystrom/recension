@@ -25,13 +25,16 @@ evalset:
 objective:
   name: exact_match
 
-# The frozen model. `backend` is `mock` (offline, deterministic, no API key) or
-# `anthropic` (needs the [anthropic] extra and ANTHROPIC_API_KEY in the
-# environment; the key is read from the environment only, never from this file).
+# The frozen model. `backend` is one of: mock (offline, deterministic, no key),
+# anthropic, openai, gemini, or ollama. Hosted providers need their extra and
+# their API key in the environment (ANTHROPIC_API_KEY / OPENAI_API_KEY /
+# GEMINI_API_KEY); the key is read from the environment only, never this file.
 model:
   backend: mock
   seed: 0                    # mock only: makes the deterministic mock reproducible
-  # model: claude-opus-4-8   # anthropic only: the model id
+  # model: claude-opus-4-8   # the provider's model id (any backend)
+  # base_url: https://...    # openai only: point at an OpenAI-compatible server
+  # host: http://localhost:11434   # ollama only: the local server
 
 # Update-time compute. All optional; defaults shown.
 budget:

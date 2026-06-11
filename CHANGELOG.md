@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-06-11
+
+More model providers. The core stays provider-agnostic; each hosted backend is an optional extra and
+reads its key from the environment only.
+
+### Added
+
+- `OpenAIModel` (extra `openai`): the Chat Completions API, which also drives OpenAI-compatible servers
+  (vLLM, LM Studio, OpenRouter, ...) via `base_url`. Reasoning models (o-series, gpt-5) are handled
+  correctly: `max_completion_tokens` instead of `max_tokens`, and `temperature` dropped (with a
+  `send_temperature` override).
+- `GeminiModel` (extra `gemini`): the Google Gemini API (google-genai), mapping `system` messages to
+  the system instruction and `assistant` to Gemini's `model` role.
+- `OllamaModel` (no extra): local models via a running Ollama server's chat API, using only the
+  standard library.
+- All three report token usage into the cost ledger and accept an injected client/transport for
+  testing. CLI `model.backend` now accepts `openai`, `gemini`, and `ollama` (with `base_url` / `host`).
+
 ## [0.5.0] - 2026-06-11
 
 Shareable audits and an ecosystem seam.

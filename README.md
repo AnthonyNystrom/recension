@@ -39,7 +39,10 @@ DSPy and GEPA own the optimization mechanics this library's `ReflectiveOptimizer
 
 ```bash
 pip install recension              # core: zero provider dependencies
-pip install "recension[anthropic]" # adds the Anthropic backend
+pip install "recension[anthropic]" # Anthropic backend
+pip install "recension[openai]"    # OpenAI (and OpenAI-compatible servers)
+pip install "recension[gemini]"    # Google Gemini
+# Ollama (local models) needs no extra: it uses the standard library
 ```
 
 Python 3.12+. The core (and the whole test suite) runs against a deterministic `MockModel` with no API key and no network.
@@ -76,15 +79,18 @@ print(record.summary())         # baseline → accepted versions → final score
 record.save("run_record.json")  # the complete audit artifact
 ```
 
-To run against a real model, install the extra (`pip install "recension[anthropic]"`), set `ANTHROPIC_API_KEY` in your environment, and use the Anthropic backend:
+To run against a real model, install the matching extra, set the provider's key in your environment, and pass the backend. The core never imports a provider, so each is kept off the top-level import:
 
 ```python
-from recension.models.anthropic import AnthropicModel  # kept off the top-level import so the core needs no provider deps
+from recension.models.anthropic import AnthropicModel  # ANTHROPIC_API_KEY
+from recension.models.openai import OpenAIModel         # OPENAI_API_KEY (also OpenAI-compatible servers via base_url)
+from recension.models.gemini import GeminiModel         # GEMINI_API_KEY / GOOGLE_API_KEY
+from recension.models.ollama import OllamaModel         # local Ollama server, no key
 
-optimizer = ReflectiveOptimizer(..., model=AnthropicModel())
+optimizer = ReflectiveOptimizer(..., model=OpenAIModel(model="gpt-4o-mini"))
 ```
 
-API keys are read from the environment only, never from code or config.
+Any object satisfying the small [`Model`](recension/models/base.py) protocol works, so bringing your own provider is a ~30-line adapter (`MockModel` is a worked template). API keys are read from the environment only, never from code or config. One honesty note: deterministic, reproducible runs are a guarantee of `MockModel` only; hosted APIs treat `seed` as a best-effort hint or ignore it.
 
 ## CLI
 

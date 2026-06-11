@@ -220,19 +220,47 @@ def _build_artifact(section: dict[str, Any]) -> TextArtifact:
 
 
 def _build_model(section: dict[str, Any]) -> Model:
+    # Provider backends are imported lazily (each needs its optional extra), and
+    # API keys come from the environment only; there is deliberately no key field.
     backend = section.get("backend", "mock")
     if backend == "mock":
         return MockModel(seed=int(section.get("seed", 0)))
     if backend == "anthropic":
-        # Imported lazily: requires the optional extra, and the API key comes
-        # from the environment only; there is deliberately no key config field.
         from .models.anthropic import AnthropicModel
 
         kwargs: dict[str, Any] = {}
         if "model" in section:
             kwargs["model"] = section["model"]
         return AnthropicModel(**kwargs)
-    raise ConfigError(f"unknown model backend {backend!r} (expected 'mock' or 'anthropic')")
+    if backend == "openai":
+        from .models.openai import OpenAIModel
+
+        okwargs: dict[str, Any] = {}
+        if "model" in section:
+            okwargs["model"] = section["model"]
+        if "base_url" in section:
+            okwargs["base_url"] = section["base_url"]
+        return OpenAIModel(**okwargs)
+    if backend == "gemini":
+        from .models.gemini import GeminiModel
+
+        gkwargs: dict[str, Any] = {}
+        if "model" in section:
+            gkwargs["model"] = section["model"]
+        return GeminiModel(**gkwargs)
+    if backend == "ollama":
+        from .models.ollama import OllamaModel
+
+        lkwargs: dict[str, Any] = {}
+        if "model" in section:
+            lkwargs["model"] = section["model"]
+        if "host" in section:
+            lkwargs["host"] = section["host"]
+        return OllamaModel(**lkwargs)
+    raise ConfigError(
+        f"unknown model backend {backend!r} "
+        "(expected 'mock', 'anthropic', 'openai', 'gemini', or 'ollama')"
+    )
 
 
 def _build_objective(section: dict[str, Any], model: Model) -> Objective:

@@ -36,7 +36,7 @@ The config is a YAML mapping. Bad values fail loudly with a `config error` and a
 | `artifact.text` / `artifact.path` | one of | Inline text, or a file to load. `artifact.name` is optional. |
 | `evalset.path` | yes | JSONL file; each record needs `id`, `input`, `split` (`train`/`validation`/optional `test`), plus `expected` (for exact_match/f1) or `rubric` (for llm_judge). |
 | `objective.name` | yes | `exact_match` (opt. `case_sensitive`), `f1`, or `llm_judge` (opt. `rubric`). |
-| `model.backend` | yes | `mock` (opt. `seed`) or `anthropic` (opt. `model`; key from the env only). |
+| `model.backend` | yes | `mock` (opt. `seed`), `anthropic` (opt. `model`), `openai` (opt. `model`, `base_url`), `gemini` (opt. `model`), or `ollama` (opt. `model`, `host`). API keys come from the environment only, never this file. |
 | `budget` | no | `candidates_per_round` (4), `rounds` (3), `diagnosis_depth` (1), `max_model_calls` (unlimited). |
 | `seed` | no | Makes the whole run reproducible against the mock. |
 | `min_improvement` | no | Margin a candidate must beat the incumbent by (default `1e-6`). |
@@ -57,6 +57,35 @@ estimate that the repeated selection on `validation` cannot give. See [Concepts]
 
 If the run hits `budget.max_model_calls` or a leakage flag in strict mode, the CLI still writes the
 partial record and exits with status `2`, so the audit trail survives the failure.
+
+### Running against a real provider
+
+The example config uses the offline `mock` backend. To run against a real model, change the `model`
+section to one of the hosted providers (install its extra and set the key in your environment) or a
+local Ollama server. Everything else in the config stays the same.
+
+```yaml
+# OpenAI (pip install "recension[openai]"; OPENAI_API_KEY in the environment)
+model:
+  backend: openai
+  model: gpt-4o-mini
+  # base_url: https://my-openai-compatible-server/v1   # optional: vLLM, LM Studio, OpenRouter, ...
+
+# Google Gemini (pip install "recension[gemini]"; GEMINI_API_KEY in the environment)
+model:
+  backend: gemini
+  model: gemini-2.0-flash
+
+# Ollama local models (no extra; start the server and `ollama pull llama3.2` first)
+model:
+  backend: ollama
+  model: llama3.2
+  # host: http://localhost:11434
+```
+
+Keys are read from the environment only, never from the config file. Note that deterministic,
+reproducible runs are a guarantee of the `mock` backend alone; hosted APIs treat the seed as a
+best-effort hint or ignore it.
 
 ## recension show
 
