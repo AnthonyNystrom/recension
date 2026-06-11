@@ -33,6 +33,19 @@ EXAMPLES = [
 ]
 
 
+def _checks(c: object) -> str:
+    """Significance and guard detail for a candidate, for the round table."""
+    bits: list[str] = []
+    sig = getattr(c, "significance", None)
+    if sig is not None:
+        verdict = "significant" if sig.significant else "not significant"
+        bits.append(f"{verdict} (gain {sig.mean_difference:+.3f})")
+    for g in getattr(c, "guard_scores", ()):
+        arrow = "regressed" if g.regressed else "ok"
+        bits.append(f"{g.name} {g.incumbent_score:.2f}->{g.candidate_score:.2f} ({arrow})")
+    return "; ".join(bits) if bits else "none"
+
+
 def render_page(name: str, title: str, doc: str, record: RunRecord) -> str:
     lines = [
         f"# {title}",
@@ -63,14 +76,16 @@ def render_page(name: str, title: str, doc: str, record: RunRecord) -> str:
             "",
             f"**Diagnosis:** {r.diagnosis}",
             "",
-            "| candidate | validation score | leakage flags | outcome |",
-            "|---|---|---|---|",
+            "| candidate | validation score | leakage flags | checks | outcome |",
+            "|---|---|---|---|---|",
         ]
         for c in r.candidates:
             score = "n/a" if c.validation_score is None else f"{c.validation_score:.4f}"
             flags = "; ".join(c.leakage_flags) if c.leakage_flags else "none"
             outcome = "**accepted**" if c.accepted else "rejected"
-            lines.append(f"| `{c.candidate_id}` | {score} | {flags} | {outcome} |")
+            lines.append(
+                f"| `{c.candidate_id}` | {score} | {flags} | {_checks(c)} | {outcome} |"
+            )
         lines.append("")
         accepted = next((c for c in r.candidates if c.accepted), None)
         if accepted is not None:
@@ -88,7 +103,39 @@ def render_page(name: str, title: str, doc: str, record: RunRecord) -> str:
         "## Result",
         "",
         f"Validation score **{record.baseline_score:.4f} → {record.final_score:.4f}** "
-        f"({record.stopped_reason}, {record.total_model_calls} model calls). "
+        f"({record.stopped_reason}, {record.total_model_calls} model calls).",
+        "",
+    ]
+    if record.final_test_score is not None:
+        gap = record.test_validation_gap if record.test_validation_gap is not None else 0.0
+        overfit = " **possible overfitting to validation**" if record.validation_overfit else ""
+        lines += [
+            f"Locked test split (scored once at the end): "
+            f"**{record.final_test_score:.4f}** (validation/test gap {gap:.4f}{overfit}).",
+            "",
+        ]
+    if record.slice_scores:
+        lines += [
+            "**Per-slice scores**",
+            "",
+            "| slice | n | baseline | final |",
+            "|---|---|---|---|",
+        ]
+        for s in record.slice_scores:
+            mark = " (regressed)" if s.regressed else ""
+            lines.append(
+                f"| {s.slice} | {s.n} | {s.baseline_score:.4f} | {s.final_score:.4f}{mark} |"
+            )
+        lines.append("")
+    if record.total_input_tokens or record.total_output_tokens:
+        lines += [
+            f"Token ledger: **{record.total_input_tokens} in / "
+            f"{record.total_output_tokens} out**.",
+            "",
+        ]
+    integrity = "verified" if not record.verify() else "FAILED"
+    lines += [
+        f"Integrity: **{integrity}** (fingerprint `{record.fingerprint()[:16]}`). "
         f"The complete audit record for this page is regenerated on every build.",
         "",
     ]

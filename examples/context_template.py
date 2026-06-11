@@ -9,6 +9,11 @@ the assembly text does. The starting template buries the context after the
 question and never tells the model to ground its answer, so answers drift.
 The accepted revision puts context first with a grounding instruction, and
 the token-level F1 against reference answers moves accordingly.
+
+Acceptance requires a *statistically significant* gain (``accept_significant``),
+a locked *test* split gives an unbiased final estimate, and the record reports
+per-*topic* slice scores so a gain on one subject area cannot hide a loss on
+another.
 """
 
 from __future__ import annotations
@@ -38,24 +43,31 @@ Answer:"""
 GROUNDING_LINE = "Answer using only the facts in the context above."
 
 RECORDS = [
-    {"id": "t1", "split": "train", "input": "When did the tower open?",
+    {"id": "t1", "split": "train", "input": "When did the tower open?", "topic": "architecture",
      "context": "The tower opened to the public in March 1889 after 26 months of work.",
      "expected": "the tower opened in march 1889"},
-    {"id": "t2", "split": "train", "input": "Who designed the bridge?",
+    {"id": "t2", "split": "train", "input": "Who designed the bridge?", "topic": "architecture",
      "context": "The bridge was designed by the engineer Othmar Ammann in 1927.",
      "expected": "the bridge was designed by othmar ammann"},
-    {"id": "t3", "split": "train", "input": "How long is the tunnel?",
+    {"id": "t3", "split": "train", "input": "How long is the tunnel?", "topic": "architecture",
      "context": "At 57 kilometres, the tunnel is the longest rail tunnel in the world.",
      "expected": "the tunnel is 57 kilometres long"},
-    {"id": "v1", "split": "validation", "input": "When did the museum open?",
+    {"id": "v1", "split": "validation", "input": "When did the museum open?", "topic": "culture",
      "context": "The museum opened in 1793 during the French Revolution.",
      "expected": "the museum opened in 1793"},
-    {"id": "v2", "split": "validation", "input": "Who built the observatory?",
+    {"id": "v2", "split": "validation", "input": "Who built the observatory?", "topic": "science",
      "context": "The observatory was built by the astronomer Tycho Brahe.",
      "expected": "the observatory was built by tycho brahe"},
-    {"id": "v3", "split": "validation", "input": "How tall is the statue?",
+    {"id": "v3", "split": "validation", "input": "How tall is the statue?", "topic": "culture",
      "context": "Including its pedestal, the statue stands 93 metres tall.",
      "expected": "the statue is 93 metres tall"},
+    # A locked test split, scored once at the end on questions never seen.
+    {"id": "x1", "split": "test", "input": "Who painted the ceiling?", "topic": "culture",
+     "context": "The ceiling was painted by the artist Michelangelo over four years.",
+     "expected": "the ceiling was painted by michelangelo"},
+    {"id": "x2", "split": "test", "input": "How deep is the lake?", "topic": "science",
+     "context": "At its deepest point the lake reaches 1642 metres.",
+     "expected": "the lake is 1642 metres deep"},
 ]
 
 _ANSWERS = {r["input"]: r["expected"] for r in RECORDS}
@@ -112,6 +124,8 @@ def build_optimizer(
         model=get_model(real, mock_script),
         budget=Budget(candidates_per_round=3, rounds=2, diagnosis_depth=2, max_model_calls=200),
         seed=11,
+        accept_significant=True,   # accept only a statistically significant validation gain
+        slice_by="topic",          # report per-topic baseline -> final scores
         render=render,
         on_progress=on_progress,
     )

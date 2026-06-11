@@ -72,6 +72,12 @@ def index() -> str:
     return render_template("index.html", examples=EXAMPLES)
 
 
+@app.route("/favicon.ico")
+def favicon() -> Response:
+    """No favicon for the demo; answer the browser's automatic request quietly."""
+    return Response(status=204)
+
+
 @app.route("/run/<name>")
 def run(name: str) -> Response:
     """Stream one example's optimization as Server-Sent Events.
@@ -91,7 +97,12 @@ def run(name: str) -> Response:
     def worker() -> None:
         try:
             record = module.build_optimizer(real=False, on_progress=on_progress).run()
-            events.put(("record", record.to_json(indent=None)))
+            # fingerprint() and verify() are methods, not serialized fields, so
+            # inject them for the page to show the integrity line.
+            data = json.loads(record.to_json(indent=None))
+            data["_fingerprint"] = record.fingerprint()
+            data["_integrity_ok"] = not record.verify()
+            events.put(("record", json.dumps(data)))
         except Exception as exc:  # surface failures to the page, never hide them
             events.put(("error", json.dumps(f"{type(exc).__name__}: {exc}")))
         finally:

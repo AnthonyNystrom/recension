@@ -143,12 +143,23 @@ function renderRecord(rec) {
       <div style="margin-bottom:.6rem">Train score ${fmt(r.train_score)} · failures analyzed:
       ${r.failure_example_ids.length ? r.failure_example_ids.map((i) => `<span class="mono">${esc(i)}</span>`).join(", ") : "none"}</div>
       <div class="diag"><b>Diagnosis:</b> ${esc(r.diagnosis)}</div>
-      <table><thead><tr><th>Candidate</th><th>Validation</th><th>Leakage flags</th><th>Outcome</th></tr></thead><tbody>`;
+      <table><thead><tr><th>Candidate</th><th>Validation</th><th>Leakage flags</th><th>Checks</th><th>Outcome</th></tr></thead><tbody>`;
     for (const c of r.candidates) {
       const flags = c.leakage_flags.length
         ? `<span class="flagcell">${c.leakage_flags.map(esc).join("; ")}</span>` : "none";
       const tag = c.accepted ? `<span class="tag acc">accepted</span>` : `<span class="tag rej">rejected</span>`;
-      html += `<tr><td class="mono">${esc(c.candidate_id)}</td><td>${fmt(c.validation_score)}</td><td>${flags}</td><td>${tag}</td></tr>`;
+      const checkBits = [];
+      if (c.significance) {
+        const v = c.significance.significant ? "significant" : "not significant";
+        const g = c.significance.mean_difference;
+        checkBits.push(`${v} (gain ${g >= 0 ? "+" : ""}${fmt(g)})`);
+      }
+      for (const gs of (c.guard_scores || [])) {
+        const ar = gs.candidate_score < gs.incumbent_score ? "regressed" : "ok";
+        checkBits.push(`${esc(gs.name)} ${fmt(gs.incumbent_score)}→${fmt(gs.candidate_score)} (${ar})`);
+      }
+      const checks = checkBits.length ? checkBits.join("<br>") : "none";
+      html += `<tr><td class="mono">${esc(c.candidate_id)}</td><td>${fmt(c.validation_score)}</td><td>${flags}</td><td>${checks}</td><td>${tag}</td></tr>`;
     }
     html += `</tbody></table>`;
     const accepted = r.candidates.find((c) => c.accepted);
@@ -161,10 +172,36 @@ function renderRecord(rec) {
     html += `</div></div>`;
   }
 
+  let extra = "";
+  if (rec.final_test_score !== null && rec.final_test_score !== undefined) {
+    const gap = rec.test_validation_gap ?? 0;
+    const warn = rec.validation_overfit ? ` <span class="tag rej">possible overfit</span>` : "";
+    extra += `<div style="margin-top:.5rem">Locked test split (scored once):
+      <b>${fmt(rec.final_test_score)}</b> · validation/test gap ${fmt(gap)}${warn}</div>`;
+  }
+  if (rec.slice_scores && rec.slice_scores.length) {
+    extra += `<div style="margin-top:.6rem"><b>Per-slice scores</b>
+      <table><thead><tr><th>Slice</th><th>n</th><th>Baseline</th><th>Final</th></tr></thead><tbody>`;
+    for (const s of rec.slice_scores) {
+      const reg = s.final_score < s.baseline_score ? ` <span class="tag rej">regressed</span>` : "";
+      extra += `<tr><td>${esc(s.slice)}</td><td>${s.n}</td><td>${fmt(s.baseline_score)}</td><td>${fmt(s.final_score)}${reg}</td></tr>`;
+    }
+    extra += `</tbody></table></div>`;
+  }
+  if (rec.total_input_tokens || rec.total_output_tokens) {
+    extra += `<div style="margin-top:.5rem;color:var(--muted)">Tokens:
+      ${rec.total_input_tokens} in / ${rec.total_output_tokens} out</div>`;
+  }
+  const integ = rec._integrity_ok
+    ? `<span class="tag acc">verified</span>` : `<span class="tag rej">FAILED</span>`;
+  extra += `<div style="margin-top:.5rem">Integrity: ${integ}
+    <span class="mono">${esc((rec._fingerprint || "").slice(0, 16))}</span></div>`;
+
   html += `<div class="panel"><h4>Result</h4>
     <div class="scoreline">${fmt(rec.baseline_score)} <span class="arrow">→</span> <b>${fmt(rec.final_score)}</b></div>
     <div style="color:var(--muted);margin-top:.3rem">${esc(rec.stopped_reason)} ·
-    ${rec.total_model_calls} model calls · objective <span class="mono">${esc(rec.objective_name)}</span></div></div>`;
+    ${rec.total_model_calls} model calls · objective <span class="mono">${esc(rec.objective_name)}</span></div>
+    ${extra}</div>`;
   return html;
 }
 

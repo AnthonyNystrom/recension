@@ -14,6 +14,10 @@ One scripted candidate also pastes a validation example's text straight into
 the instructions. It scores well, and the leakage heuristics flag it in the
 record, which is exactly the point: a gain you got by memorizing the held-out
 set is not a gain.
+
+Acceptance requires a *statistically significant* gain (``accept_significant``),
+a locked *test* split gives an unbiased final estimate, and a ``MaxLength``
+*guard* confirms the structured rewrite also keeps summaries tight.
 """
 
 from __future__ import annotations
@@ -23,7 +27,15 @@ from collections.abc import Callable
 
 from common import get_model, parse_args, report
 
-from recension import Budget, EvalSet, LLMJudge, ReflectiveOptimizer, RunRecord, TextArtifact
+from recension import (
+    Budget,
+    EvalSet,
+    LLMJudge,
+    MaxLength,
+    ReflectiveOptimizer,
+    RunRecord,
+    TextArtifact,
+)
 from recension.models import Message
 
 STARTING_SKILL = """\
@@ -62,6 +74,10 @@ RECORDS = [
     {"id": "v2", "split": "validation",
      "input": "Headcount stayed flat while shipped features doubled; attrition in "
               "the platform team remains the main delivery risk."},
+    # A locked test split: a report never seen during optimization, judged once.
+    {"id": "x1", "split": "test",
+     "input": "Cloud spend rose 31% after the migration, but unit cost per request fell "
+              "12% and reserved-instance coverage reached 80%."},
 ]
 
 
@@ -112,6 +128,8 @@ def build_optimizer(
         model=model,
         budget=Budget(candidates_per_round=3, rounds=2, diagnosis_depth=1, max_model_calls=300),
         seed=23,
+        accept_significant=True,   # accept only a statistically significant validation gain
+        guards=[MaxLength(70)],     # the structured rewrite must keep summaries tight
         on_progress=on_progress,
     )
 

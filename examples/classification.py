@@ -9,6 +9,12 @@ so the model answers free-form and misses. The optimizer diagnoses that from
 train failures, proposes four distinct revisions, and accepts the one that
 states the labels, because it wins on the *validation* split, not because it
 looked good to anyone.
+
+This example also exercises the measurement and governance features: acceptance
+requires a *statistically significant* gain (``accept_significant``), a locked
+*test* split gives an unbiased final estimate, the record reports per-channel
+*slice* scores, and a ``MaxLength`` *guard* confirms the fix did not start
+producing long, sentence-style outputs.
 """
 
 from __future__ import annotations
@@ -18,7 +24,15 @@ from collections.abc import Callable
 
 from common import get_model, parse_args, report
 
-from recension import Budget, EvalSet, ExactMatch, ReflectiveOptimizer, RunRecord, TextArtifact
+from recension import (
+    Budget,
+    EvalSet,
+    ExactMatch,
+    MaxLength,
+    ReflectiveOptimizer,
+    RunRecord,
+    TextArtifact,
+)
 from recension.models import Message
 
 STARTING_PROMPT = "Decide how the customer feels about the product."
@@ -27,20 +41,27 @@ GOOD_INSTRUCTION = 'Answer with exactly one word: "positive" or "negative".'
 
 RECORDS = [
     {"id": "t1", "input": "Absolutely love it, works perfectly", "expected": "positive",
-     "split": "train"},
+     "split": "train", "channel": "reviews"},
     {"id": "t2", "input": "Broke after two days, terrible build", "expected": "negative",
-     "split": "train"},
+     "split": "train", "channel": "reviews"},
     {"id": "t3", "input": "Great value and fast shipping", "expected": "positive",
-     "split": "train"},
-    {"id": "t4", "input": "Awful smell out of the box", "expected": "negative", "split": "train"},
+     "split": "train", "channel": "reviews"},
+    {"id": "t4", "input": "Awful smell out of the box", "expected": "negative",
+     "split": "train", "channel": "support"},
     {"id": "v1", "input": "Terrible support experience", "expected": "negative",
-     "split": "validation"},
+     "split": "validation", "channel": "support"},
     {"id": "v2", "input": "Love the design, great battery", "expected": "positive",
-     "split": "validation"},
+     "split": "validation", "channel": "reviews"},
     {"id": "v3", "input": "Awful firmware, constant crashes", "expected": "negative",
-     "split": "validation"},
+     "split": "validation", "channel": "support"},
     {"id": "v4", "input": "Great gift, my dad loves it", "expected": "positive",
-     "split": "validation"},
+     "split": "validation", "channel": "reviews"},
+    # A locked test split: never touched during optimization, scored once at the
+    # end for an unbiased final estimate.
+    {"id": "x1", "input": "Broke instantly, awful experience", "expected": "negative",
+     "split": "test", "channel": "support"},
+    {"id": "x2", "input": "Love it, a great purchase", "expected": "positive",
+     "split": "test", "channel": "reviews"},
 ]
 
 _POSITIVE = ("love", "great", "perfect")
@@ -89,6 +110,9 @@ def build_optimizer(
         model=get_model(real, mock_script),
         budget=Budget(candidates_per_round=4, rounds=2, diagnosis_depth=2, max_model_calls=200),
         seed=7,
+        accept_significant=True,   # accept only a statistically significant validation gain
+        slice_by="channel",        # report per-channel baseline -> final scores
+        guards=[MaxLength(20)],     # the fix must not regress output brevity
         on_progress=on_progress,
     )
 
