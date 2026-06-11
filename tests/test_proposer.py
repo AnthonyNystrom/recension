@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
-from recension import Example
-from recension.models import Message, MockModel
+from recension import (
+    Budget,
+    CallableProposer,
+    DefaultProposer,
+    EvalSet,
+    ExactMatch,
+    Example,
+    Proposer,
+    ReflectiveOptimizer,
+    TextArtifact,
+)
+from recension.models import Message, MockModel, Model
 from recension.proposer import FailureCase, diagnose, extract_candidate, propose
 
 
@@ -111,3 +121,73 @@ class TestPropose:
         assert "genuinely different approach" not in seen[0]
         assert "genuinely different approach" in seen[1]
         assert "State the allowed labels explicitly" in seen[1]
+
+
+def _plugin_evalset() -> EvalSet:
+    return EvalSet.from_records(
+        [
+            {"id": "t1", "input": "in", "expected": "FIXED", "split": "train"},
+            {"id": "v1", "input": "in", "expected": "FIXED", "split": "validation"},
+        ]
+    )
+
+
+def _marker_model() -> MockModel:
+    # Emits "FIXED" only once the artifact (system) carries the MAGIC marker.
+    def script(messages: list[Message]) -> str:
+        system = next((m["content"] for m in messages if m["role"] == "system"), "")
+        return "FIXED" if "MAGIC" in system else "wrong"
+
+    return MockModel(script=script)
+
+
+class TestPluggableProposer:
+    def test_default_proposer_satisfies_protocol(self) -> None:
+        assert isinstance(DefaultProposer(), Proposer)
+
+    def test_custom_proposer_drives_a_full_run(self) -> None:
+        def my_propose(
+            model: Model, text: str, diagnosis: str, n: int, seed: int | None
+        ) -> list[str]:
+            return ["MAGIC: emit FIXED"]
+
+        def my_diagnose(
+            model: Model, text: str, failures: list[FailureCase], seed: int | None
+        ) -> str:
+            return "the artifact lacks the MAGIC marker"
+
+        proposer = CallableProposer(my_propose, my_diagnose)
+        assert isinstance(proposer, Proposer)
+        record = ReflectiveOptimizer(
+            artifact=TextArtifact.from_text("start", name="clf"),
+            evalset=_plugin_evalset(),
+            objective=ExactMatch(),
+            model=_marker_model(),
+            budget=Budget(candidates_per_round=1, rounds=1),
+            seed=3,
+            proposer=proposer,
+        ).run()
+        round1 = record.rounds[0]
+        assert round1.diagnosis == "the artifact lacks the MAGIC marker"
+        accepted = [c for c in round1.candidates if c.accepted]
+        assert len(accepted) == 1
+        assert accepted[0].text == "MAGIC: emit FIXED"
+        assert record.final_score == 1.0
+
+    def test_callable_proposer_falls_back_to_default_diagnosis(self) -> None:
+        def my_propose(
+            model: Model, text: str, diagnosis: str, n: int, seed: int | None
+        ) -> list[str]:
+            return ["MAGIC: emit FIXED"]
+
+        record = ReflectiveOptimizer(
+            artifact=TextArtifact.from_text("start", name="clf"),
+            evalset=_plugin_evalset(),
+            objective=ExactMatch(),
+            model=_marker_model(),
+            budget=Budget(candidates_per_round=1, rounds=1),
+            seed=3,
+            proposer=CallableProposer(my_propose),
+        ).run()
+        assert record.rounds[0].diagnosis  # produced by the built-in diagnoser
+        assert record.final_score == 1.0

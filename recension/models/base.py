@@ -7,9 +7,10 @@ deterministic mock for offline tests.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict, runtime_checkable
 
-__all__ = ["Message", "Model", "Role"]
+__all__ = ["Message", "Model", "Role", "SupportsUsage", "TokenUsage"]
 
 Role = Literal["system", "user", "assistant"]
 """Message roles understood by every backend."""
@@ -20,6 +21,35 @@ class Message(TypedDict):
 
     role: Role
     content: str
+
+
+@dataclass(frozen=True)
+class TokenUsage:
+    """Input/output token counts for one completion (or a sum of them)."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    def __add__(self, other: TokenUsage) -> TokenUsage:
+        return TokenUsage(
+            self.input_tokens + other.input_tokens,
+            self.output_tokens + other.output_tokens,
+        )
+
+
+@runtime_checkable
+class SupportsUsage(Protocol):
+    """Optional capability: a model that reports the token usage of its last call.
+
+    Models that implement it feed the optimizer's cost ledger; models that do
+    not simply contribute zeros, so usage reporting is fully backward
+    compatible.
+    """
+
+    @property
+    def last_usage(self) -> TokenUsage:
+        """Token usage of the most recent ``complete`` call."""
+        ...
 
 
 @runtime_checkable

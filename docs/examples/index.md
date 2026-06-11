@@ -21,3 +21,18 @@ Each example is a small, self-contained instance of one of the [use cases](../us
 Every run also produces a [`RunRecord`](../api.md#recension.record.RunRecord), the governance-and-audit artifact common to all four use cases.
 
 The pages are regenerated from real runs with `make examples`, so the site cannot drift from the code.
+
+## A runnable CLI example
+
+[`examples/cli/`](https://github.com/AnthonyNystrom/recension/tree/main/examples/cli) holds a fully
+commented `run.yaml` and dataset you can run without writing any Python:
+
+```bash
+recension run --config examples/cli/run.yaml   # writes run_record.json
+recension show run_record.json                 # summary + integrity line
+recension report run_record.json -o report.html  # standalone HTML audit
+```
+
+The config demonstrates the optional measurement and governance features added since 0.1.0: a locked
+`test` split, the significance gate, per-slice reporting, and non-regression guards (see the
+[CLI guide](../cli.md) for the full schema and a `recension check` CI recipe).

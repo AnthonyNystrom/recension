@@ -1,5 +1,7 @@
-{"id": "t1", "input": "Absolutely love this, works perfectly", "expected": "positive", "split": "train"}
-{"id": "t2", "input": "Broke after a day, total junk", "expected": "negative", "split": "train"}
-{"id": "t3", "input": "Great value and fast shipping", "expected": "positive", "split": "train"}
-{"id": "v1", "input": "Terrible support, never again", "expected": "negative", "split": "validation"}
-{"id": "v2", "input": "Fantastic, exceeded expectations", "expected": "positive", "split": "validation"}
+{"id": "t1", "input": "Absolutely love this, works perfectly", "expected": "positive", "split": "train", "domain": "product"}
+{"id": "t2", "input": "Broke after a day, total junk", "expected": "negative", "split": "train", "domain": "product"}
+{"id": "t3", "input": "Great value and fast shipping", "expected": "positive", "split": "train", "domain": "shipping"}
+{"id": "v1", "input": "Terrible support, never again", "expected": "negative", "split": "validation", "domain": "support"}
+{"id": "v2", "input": "Fantastic, exceeded expectations", "expected": "positive", "split": "validation", "domain": "product"}
+{"id": "x1", "input": "Worst purchase ever made", "expected": "negative", "split": "test", "domain": "product"}
+{"id": "x2", "input": "Delighted, would buy again", "expected": "positive", "split": "test", "domain": "product"}

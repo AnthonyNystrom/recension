@@ -5,7 +5,7 @@ the optional ``anthropic`` extra. Import it from
 ``recension.models.anthropic`` when needed.
 """
 
-from .base import Message, Model, Role
+from .base import Message, Model, Role, SupportsUsage, TokenUsage
 from .mock import MockModel
 
-__all__ = ["Message", "MockModel", "Model", "Role"]
+__all__ = ["Message", "MockModel", "Model", "Role", "SupportsUsage", "TokenUsage"]

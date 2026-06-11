@@ -20,36 +20,55 @@ from .exceptions import (
     RecensionError,
 )
 from .models import Message, MockModel, Model
-from .objective import F1, ExactMatch, LLMJudge, Objective
-from .optimizer import ReflectiveOptimizer
-from .record import CandidateRecord, RoundRecord, RunRecord
+from .objective import F1, ExactMatch, LLMJudge, MaxLength, Objective
+from .optimizer import ReflectiveOptimizer, score_artifact
+from .proposer import CallableProposer, DefaultProposer, FailureCase, Proposer
+from .record import (
+    CandidateRecord,
+    GuardScore,
+    RoundRecord,
+    RunRecord,
+    SignificanceRecord,
+    SliceScore,
+)
+from .report import render_report
 
-__version__ = "0.1.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "ArtifactError",
     "Budget",
     "BudgetExceeded",
+    "CallableProposer",
     "CandidateRecord",
     "ConfigError",
+    "DefaultProposer",
     "DegenerateEvalError",
     "EvalSet",
     "ExactMatch",
     "Example",
     "F1",
+    "FailureCase",
+    "GuardScore",
     "LLMJudge",
+    "MaxLength",
     "LeakageDetected",
     "Message",
     "MockModel",
     "Model",
     "Objective",
+    "Proposer",
     "Provenance",
     "RecensionError",
     "ReflectiveOptimizer",
     "RejectedCandidate",
     "RoundRecord",
     "RunRecord",
+    "SignificanceRecord",
+    "SliceScore",
     "TextArtifact",
+    "render_report",
+    "score_artifact",
     "Version",
     "__version__",
 ]

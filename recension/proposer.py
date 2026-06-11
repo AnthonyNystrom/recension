@@ -9,13 +9,22 @@ tests nothing, so near-duplicate candidates are rejected and regenerated.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from typing import Protocol, runtime_checkable
 
 from .evalset import Example
 from .models.base import Message, Model
 
-__all__ = ["FailureCase", "diagnose", "propose"]
+__all__ = [
+    "CallableProposer",
+    "DefaultProposer",
+    "FailureCase",
+    "Proposer",
+    "diagnose",
+    "propose",
+]
 
 #: Candidates whose similarity ratio exceeds this are treated as duplicates.
 NEAR_DUPLICATE_RATIO = 0.95
@@ -173,3 +182,113 @@ def _is_near_duplicate(a: str, b: str) -> bool:
     if a == b:
         return True
     return SequenceMatcher(None, a, b).ratio() > NEAR_DUPLICATE_RATIO
+
+
+# -- pluggable proposer interface ----------------------------------------------
+
+#: A function that proposes ``n`` candidate revisions, given (model, text,
+#: diagnosis, n, seed). The seam for wrapping an external optimizer.
+ProposeFn = Callable[[Model, str, str, int, "int | None"], "list[str]"]
+
+#: A function that diagnoses failures, given (model, text, failures, seed).
+DiagnoseFn = Callable[[Model, str, "list[FailureCase]", "int | None"], str]
+
+
+@runtime_checkable
+class Proposer(Protocol):
+    """Pluggable candidate generator: diagnose failures, then propose edits.
+
+    The built-in heuristic proposer (:class:`DefaultProposer`) is one
+    implementation. A custom proposer, for example one wrapping an external
+    optimizer such as DSPy or GEPA, can be injected with
+    ``ReflectiveOptimizer(proposer=...)`` **without changing the artifact,
+    evalset, or record abstractions**: recension keeps owning versioning,
+    held-out measurement, leakage detection, and the audit record; the proposer
+    only supplies the candidate edits. This is the seam that lets recension act
+    as the measurement-and-governance layer on top of any optimizer.
+    """
+
+    def diagnose(
+        self,
+        model: Model,
+        artifact_text: str,
+        failures: list[FailureCase],
+        *,
+        seed: int | None = None,
+    ) -> str:
+        """Return a short hypothesis about why ``artifact_text`` failed."""
+        ...
+
+    def propose(
+        self,
+        model: Model,
+        artifact_text: str,
+        diagnosis: str,
+        n: int,
+        *,
+        seed: int | None = None,
+    ) -> list[str]:
+        """Return up to ``n`` distinct candidate revisions of ``artifact_text``."""
+        ...
+
+
+class DefaultProposer:
+    """The built-in proposer: the module-level :func:`diagnose`/:func:`propose`."""
+
+    def diagnose(
+        self,
+        model: Model,
+        artifact_text: str,
+        failures: list[FailureCase],
+        *,
+        seed: int | None = None,
+    ) -> str:
+        return diagnose(model, artifact_text, failures, seed=seed)
+
+    def propose(
+        self,
+        model: Model,
+        artifact_text: str,
+        diagnosis: str,
+        n: int,
+        *,
+        seed: int | None = None,
+    ) -> list[str]:
+        return propose(model, artifact_text, diagnosis, n, seed=seed)
+
+
+class CallableProposer:
+    """Adapt plain functions into a :class:`Proposer`.
+
+    Wrap an external optimizer's propose function (and optionally a diagnose
+    function) without writing a class. Either may be ``None`` for diagnose, in
+    which case the built-in diagnosis is used. The seam for "bring your own
+    optimizer": recension governs the run; your function proposes the edits.
+    """
+
+    def __init__(self, propose_fn: ProposeFn, diagnose_fn: DiagnoseFn | None = None) -> None:
+        self._propose_fn = propose_fn
+        self._diagnose_fn = diagnose_fn
+
+    def diagnose(
+        self,
+        model: Model,
+        artifact_text: str,
+        failures: list[FailureCase],
+        *,
+        seed: int | None = None,
+    ) -> str:
+        if self._diagnose_fn is not None:
+            return self._diagnose_fn(model, artifact_text, failures, seed)
+        return diagnose(model, artifact_text, failures, seed=seed)
+
+    def propose(
+        self,
+        model: Model,
+        artifact_text: str,
+        diagnosis: str,
+        n: int,
+        *,
+        seed: int | None = None,
+    ) -> list[str]:
+        return self._propose_fn(model, artifact_text, diagnosis, n, seed)

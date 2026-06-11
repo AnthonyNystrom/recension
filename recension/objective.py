@@ -17,7 +17,7 @@ from .evalset import Example
 from .exceptions import DegenerateEvalError
 from .models.base import Message, Model
 
-__all__ = ["ExactMatch", "F1", "LLMJudge", "Objective"]
+__all__ = ["ExactMatch", "F1", "LLMJudge", "MaxLength", "Objective"]
 
 
 @runtime_checkable
@@ -115,6 +115,30 @@ class F1:
 
     def aggregate(self, scores: Sequence[float]) -> float:
         """Mean of the per-example scores."""
+        return _mean(scores)
+
+
+class MaxLength:
+    """Guard objective: 1.0 if the output is within ``max_chars``, else 0.0.
+
+    Intended as a non-regression *guard* (``ReflectiveOptimizer(guards=[...])``):
+    a candidate that starts producing over-long outputs lowers this score and is
+    rejected even if it improves the primary metric. Reference-free, so no
+    ``expected`` is needed.
+    """
+
+    model_graded = False
+
+    def __init__(self, max_chars: int) -> None:
+        self.name = f"max_length({max_chars})"
+        self.max_chars = max_chars
+
+    def score(self, model_output: str, example: Example) -> float:
+        """1.0 if ``model_output`` is at most ``max_chars`` long, else 0.0."""
+        return 1.0 if len(model_output) <= self.max_chars else 0.0
+
+    def aggregate(self, scores: Sequence[float]) -> float:
+        """Mean (the fraction of outputs within the limit)."""
         return _mean(scores)
 
 

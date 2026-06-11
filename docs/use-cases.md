@@ -86,6 +86,17 @@ diff. Accepted versions carry that provenance on the artifact itself, the
 [`Budget`](api.md#recension.budget.Budget) caps update-time spend. Inspect any run with
 `recension show run_record.json`.
 
+The record is built to be acted on, not just filed. Gate merges in CI with `recension check`, which
+fails the build if the current prompt regressed below a baseline. Detect after-the-fact tampering with
+`recension verify` (artifact version ids are content-addressed, so an altered version is caught with no
+external reference; records can also be HMAC-signed). And hand a reviewer a single standalone HTML
+audit with `recension report`. For acceptance itself, the optional
+[significance gate](concepts.md#significance-not-just-an-epsilon) requires a gain to clear a confidence
+bar rather than an epsilon, a [locked test split](concepts.md#the-locked-test-split-and-why-it-matters)
+gives an unbiased final estimate, and [per-slice scores and guard
+objectives](concepts.md#beyond-one-number-slices-guards-and-cost) catch a change that lifts the overall
+number while regressing a segment.
+
 ---
 
 ## When recension is not the right tool

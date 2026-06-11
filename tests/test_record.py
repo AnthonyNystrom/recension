@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
-from recension import Budget, CandidateRecord, Provenance, RoundRecord, RunRecord, TextArtifact
+from recension import (
+    Budget,
+    CandidateRecord,
+    Provenance,
+    RoundRecord,
+    RunRecord,
+    SliceScore,
+    TextArtifact,
+)
 
 
 def make_record() -> RunRecord:
@@ -77,6 +86,62 @@ def test_restored_artifact_supports_diff() -> None:
     out = artifact.diff(record.baseline_version_id, record.final_version_id)
     assert "-v1 text" in out
     assert "+v2 text" in out
+
+
+def test_verify_passes_on_intact_record() -> None:
+    record = make_record()
+    assert record.verify() == []
+
+
+def test_verify_catches_tampered_embedded_artifact() -> None:
+    record = make_record()
+    # Forge a version's text in the embedded artifact without fixing its id.
+    record.artifact["versions"][1]["text"] = "forged text\n"
+    problems = record.verify()
+    assert problems
+    assert "content hash" in problems[0]
+
+
+def test_fingerprint_is_stable_and_change_sensitive() -> None:
+    record = make_record()
+    fp = record.fingerprint()
+    assert record.fingerprint() == fp  # stable for the same record
+    assert RunRecord.from_json(record.to_json()).fingerprint() == fp  # survives a round trip
+    record.final_score = 0.99  # any field change moves the fingerprint
+    assert record.fingerprint() != fp
+
+
+def test_partial_record_with_nan_score_serializes_to_valid_json() -> None:
+    # A budget-exhausted partial record can carry an uncomputed NaN score; the
+    # serialized form must still be valid, interoperable JSON.
+    record = make_record()
+    record.baseline_score = float("nan")
+    payload = record.to_json()
+    assert "NaN" not in payload
+    assert json.loads(payload)["baseline_score"] is None  # strict parse succeeds
+    assert len(record.fingerprint()) == 64  # canonical JSON is computable
+
+
+def test_hmac_signature_roundtrip() -> None:
+    record = make_record()
+    sig = record.sign("s3cret")
+    assert record.verify_signature("s3cret", sig)
+    assert not record.verify_signature("wrong-key", sig)
+    assert not record.verify_signature("s3cret", "deadbeef")
+
+
+def test_slice_score_regressed_property_and_summary() -> None:
+    record = make_record()
+    record.slice_scores = [
+        SliceScore(slice="us", n=10, baseline_score=0.6, final_score=0.8),
+        SliceScore(slice="eu", n=8, baseline_score=0.7, final_score=0.5),
+    ]
+    assert not record.slice_scores[0].regressed
+    assert record.slice_scores[1].regressed
+    text = record.summary()
+    assert "slices:" in text
+    assert "eu (n=8): 0.7000 -> 0.5000  [REGRESSED]" in text
+    assert RunRecord.from_json(record.to_json()) == record
 
 
 def test_summary_degrades_on_missing_accepted_candidate() -> None:

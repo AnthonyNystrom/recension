@@ -30,9 +30,17 @@ Generated from the package docstrings.
 
 ::: recension.leakage
 
+## Statistics
+
+::: recension.stats
+
 ## Run records
 
 ::: recension.record
+
+## HTML report
+
+::: recension.report
 
 ## Models
 

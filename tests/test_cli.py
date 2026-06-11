@@ -82,6 +82,90 @@ def test_diff_prints_version_diff(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert "no differences" in capsys.readouterr().out
 
 
+def test_show_reports_integrity(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config_path = write_inputs(tmp_path)
+    main(["run", "--config", str(config_path)])
+    capsys.readouterr()
+    main(["show", str(tmp_path / "record.json")])
+    assert "integrity: verified" in capsys.readouterr().out
+
+
+def test_report_writes_standalone_html(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = write_inputs(tmp_path)
+    main(["run", "--config", str(config_path)])
+    out_path = tmp_path / "audit.html"
+    assert main(["report", str(tmp_path / "record.json"), "-o", str(out_path)]) == 0
+    html = out_path.read_text()
+    assert html.startswith("<!doctype html>")
+    assert "recension audit" in html
+
+
+def test_verify_passes_on_intact_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = write_inputs(tmp_path)
+    main(["run", "--config", str(config_path)])
+    capsys.readouterr()
+    assert main(["verify", str(tmp_path / "record.json")]) == 0
+    assert "integrity: verified" in capsys.readouterr().out
+
+
+def test_verify_fails_on_tampered_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = write_inputs(tmp_path)
+    main(["run", "--config", str(config_path)])
+    record_path = tmp_path / "record.json"
+    data = json.loads(record_path.read_text())
+    data["artifact"]["versions"][0]["text"] = "tampered\n"  # forge the root text
+    record_path.write_text(json.dumps(data))
+    capsys.readouterr()
+    assert main(["verify", str(record_path)]) == 2
+    assert "integrity: FAILED" in capsys.readouterr().err
+
+
+def test_check_passes_when_not_regressed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = write_inputs(tmp_path)
+    capsys.readouterr()
+    # The mock scores 0 on validation; baseline 0.0 means no regression.
+    assert main(["check", "--config", str(config_path), "--baseline", "0.0"]) == 0
+    assert "OK: no regression" in capsys.readouterr().out
+
+
+def test_check_fails_when_regressed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = write_inputs(tmp_path)
+    capsys.readouterr()
+    assert main(["check", "--config", str(config_path), "--baseline", "0.5"]) == 1
+    assert "REGRESSION" in capsys.readouterr().err
+
+
+def test_check_baseline_from_record_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = write_inputs(tmp_path)
+    main(["run", "--config", str(config_path)])
+    capsys.readouterr()
+    # Compare the current artifact against the record's final validation score.
+    assert main(
+        ["check", "--config", str(config_path), "--baseline", str(tmp_path / "record.json")]
+    ) == 0
+
+
+def test_check_empty_split_is_config_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = write_inputs(tmp_path)  # no test split in the fixture data
+    args = ["check", "--config", str(config_path), "--baseline", "0.0", "--split", "test"]
+    assert main(args) == 1
+    assert "empty" in capsys.readouterr().err
+
+
 def test_missing_config_is_a_config_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

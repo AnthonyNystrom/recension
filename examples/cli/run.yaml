@@ -44,5 +44,20 @@ seed: 7                       # optional: makes the whole run reproducible again
 min_improvement: 0.000001     # optional: margin a candidate must beat the incumbent by (default 1e-6)
 strict_leakage: false         # optional: raise on a leakage-flagged winner instead of accepting it
 
+# Honest-measurement options (all optional).
+accept_significant: false     # require the validation gain to be statistically significant, not just > margin
+alpha: 0.05                   # significance level for the bootstrap CI (95% interval)
+bootstrap_resamples: 2000     # resamples for the significance bootstrap
+overfit_gap: 0.1              # flag overfitting if the final validation score beats the test score by more than this
+# (add records with split: "test" to data.jsonl to get a locked, scored-once test estimate)
+
+# Multi-dimensional options (all optional). slice_by is active here: the dataset
+# tags each example with a "domain" so the record reports per-subgroup scores.
+slice_by: domain              # an Example metadata key; reports per-subgroup baseline->final scores
+slice_tolerance: 0.0          # announce a slice as regressed when it drops by more than this
+# guards:                     # secondary objectives that must not regress for a candidate to be accepted
+#   - {name: max_length, max_chars: 200}
+# guard_tolerance: 0.0        # allowed drop on a guard before it counts as a regression
+
 output: run_record.json       # where to write the audit record
 # write_artifact: optimized_prompt.txt   # optional: also write the final artifact text

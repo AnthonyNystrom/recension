@@ -4,6 +4,73 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-06-11
+
+Shareable audits and an ecosystem seam.
+
+### Added
+
+- `recension report <record.json> -o report.html` renders a run record into a single standalone HTML
+  audit page (inline CSS, no assets, no network): baseline and final scores, the locked test estimate
+  and overfit flag, every round's diagnosis and candidates with significance/guard/leakage detail, the
+  accepted diff, the per-slice breakdown, the token ledger, and the integrity status. New public
+  `render_report`.
+- A pluggable `Proposer` interface (`ReflectiveOptimizer(proposer=...)`) so candidate generation can be
+  supplied by an external optimizer (DSPy, GEPA, or your own) while recension keeps owning versioning,
+  held-out measurement, leakage detection, and the audit record. Ships `DefaultProposer` (the built-in
+  reflective loop) and `CallableProposer` (wrap plain functions). New "Bring your own optimizer" docs.
+
+## [0.4.0] - 2026-06-11
+
+Multi-dimensional evaluation: one number hides regressions. All additions are opt-in.
+
+### Added
+
+- Per-slice reporting: set `slice_by` to an `Example.metadata` key and the record carries per-subgroup
+  baseline-vs-final scores (`SliceScore`), so a run that improves overall while regressing a segment is
+  visible. `slice_tolerance` controls when a slice is announced as regressed.
+- Guarded acceptance: `guards=[...]` of secondary objectives that must not regress. A candidate that
+  improves the primary metric but lowers a guard beyond `guard_tolerance` is rejected, with the
+  incumbent-vs-candidate guard scores recorded (`GuardScore`). Ships the `MaxLength` guard objective.
+- Cost ledger: an optional model-usage capability (`SupportsUsage` / `TokenUsage`). `MockModel` reports
+  synthetic deterministic counts; `AnthropicModel` reads `response.usage`. The record carries per-round
+  and total input/output tokens. Models without usage report zeros.
+- CLI config keys: `slice_by`, `slice_tolerance`, `guards`, `guard_tolerance`.
+
+## [0.3.0] - 2026-06-11
+
+Prompts as tested, tamper-evident artifacts.
+
+### Added
+
+- `recension check`: a prompt regression guard for CI. Scores the current artifact against a baseline
+  (a prior record's score or a literal) on the validation or test split and exits non-zero on a
+  regression, so a prompt change that hurts your eval set fails the build. Backed by the new public
+  `score_artifact` helper. Docs include a GitHub Actions recipe.
+- Tamper-evident records: `RunRecord.verify()` checks the embedded artifact's content-addressed
+  version chain (catching edited text/ids with no external reference), `RunRecord.fingerprint()` is a
+  deterministic content hash, and `sign()` / `verify_signature()` add optional HMAC signing
+  (`RECENSION_SIGNING_KEY`). New `recension verify` command; `recension show` prints an integrity line.
+  `TextArtifact.verify()` exposes the version-chain check directly.
+
+## [0.2.0] - 2026-06-10
+
+Honest measurement. Both additions are opt-in; 0.1.0 code is unaffected.
+
+### Added
+
+- Optional locked `test` split on `EvalSet` (records with `split: "test"`). The optimizer scores the
+  final incumbent on it exactly once and records `final_test_score`, the `validation`/`test` gap, and
+  a `validation_overfit` flag when the gap exceeds `overfit_gap` (default 0.1). This gives an unbiased
+  final estimate that the repeated selection on `validation` cannot.
+- Significance-based acceptance (`accept_significant`, with `alpha` and `bootstrap_resamples`). When
+  on, a candidate is accepted only if its validation gain is statistically significant (a seeded
+  paired-bootstrap confidence interval excluding 0), not merely above `min_improvement`. The bootstrap
+  is recorded on the round's best candidate. New stdlib-only `recension.stats` module; new
+  `SignificanceRecord`.
+- CLI config keys for the above (`accept_significant`, `alpha`, `bootstrap_resamples`, `overfit_gap`)
+  and a `test` split in `examples/cli/`.
+
 ## [0.1.0] - 2026-06-10
 
 Initial release.

@@ -164,6 +164,31 @@ class TextArtifact:
         a, b = self.get(version_a), self.get(version_b)
         return _diff_texts(a.text, b.text, version_a, version_b)
 
+    def verify(self) -> list[str]:
+        """Check content-addressing integrity of the version history.
+
+        Version ids are a hash of ``(parent_id, text)``, so editing a version's
+        text or id after the fact, or breaking the parent chain, is detectable.
+        Returns a list of human-readable problems, empty when the history is
+        intact. This is the self-contained tamper-evidence behind
+        :meth:`recension.record.RunRecord.verify`.
+        """
+        problems: list[str] = []
+        for i, version in enumerate(self._versions):
+            expected_parent = None if i == 0 else self._versions[i - 1].version_id
+            if version.parent_id != expected_parent:
+                problems.append(
+                    f"version {version.version_id!r} has parent {version.parent_id!r}, "
+                    f"expected {expected_parent!r}"
+                )
+            expected_id = _version_id(version.parent_id, version.text)
+            if version.version_id != expected_id:
+                problems.append(
+                    f"version {version.version_id!r} does not match its content hash "
+                    f"({expected_id!r}); the text or id may have been altered"
+                )
+        return problems
+
     # -- writing ------------------------------------------------------------
 
     def commit(self, text: str, provenance: Provenance) -> Version:

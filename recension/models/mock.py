@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 
-from .base import Message
+from .base import Message, TokenUsage
 
 __all__ = ["MockModel"]
 
@@ -37,11 +37,17 @@ class MockModel:
         self.script = script
         self.seed = seed
         self._calls = 0
+        self._last_usage = TokenUsage()
 
     @property
     def call_count(self) -> int:
         """Number of ``complete`` calls made on this instance."""
         return self._calls
+
+    @property
+    def last_usage(self) -> TokenUsage:
+        """Synthetic, deterministic token usage of the last call (roughly chars/4)."""
+        return self._last_usage
 
     def complete(
         self,
@@ -59,13 +65,17 @@ class MockModel:
         """
         self._calls += 1
         if self.script is not None:
-            return self.script(list(messages))
-        effective_seed = self.seed if seed is None else seed
-        digest = hashlib.sha256()
-        digest.update(str(effective_seed).encode())
-        for message in messages:
-            digest.update(message["role"].encode())
-            digest.update(b"\x00")
-            digest.update(message["content"].encode())
-            digest.update(b"\x01")
-        return f"mock-output-{digest.hexdigest()[:16]}"
+            reply = self.script(list(messages))
+        else:
+            effective_seed = self.seed if seed is None else seed
+            digest = hashlib.sha256()
+            digest.update(str(effective_seed).encode())
+            for message in messages:
+                digest.update(message["role"].encode())
+                digest.update(b"\x00")
+                digest.update(message["content"].encode())
+                digest.update(b"\x01")
+            reply = f"mock-output-{digest.hexdigest()[:16]}"
+        prompt_chars = sum(len(m["content"]) for m in messages)
+        self._last_usage = TokenUsage(prompt_chars // 4, len(reply) // 4)
+        return reply

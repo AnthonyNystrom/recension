@@ -50,6 +50,15 @@ class TestMockModel:
         assert model.complete([msg("system", "s"), msg("user", "u")]) == "saw 2 messages"
         assert model.call_count == 1
 
+    def test_reports_synthetic_usage(self) -> None:
+        from recension.models import SupportsUsage
+
+        model = MockModel(script=lambda m: "abcdefgh")  # 8-char reply
+        assert isinstance(model, SupportsUsage)
+        model.complete([msg("user", "x" * 40)])
+        assert model.last_usage.input_tokens == 10  # 40 chars // 4
+        assert model.last_usage.output_tokens == 2  # 8 chars // 4
+
 
 class TestSplitSystem:
     def test_lifts_system_messages(self) -> None:

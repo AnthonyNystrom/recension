@@ -31,9 +31,11 @@ The result of a run is a [`RunRecord`](api.md#recension.record.RunRecord), an au
 
 ## Why measurement and provenance matter
 
-- **No edit is accepted on vibes.** Acceptance happens on validation data the diagnosis never saw.
+- **No edit is accepted on vibes.** Acceptance happens on validation data the diagnosis never saw, and can require the gain to be [statistically significant](concepts.md#significance-not-just-an-epsilon), not just above an epsilon. An optional locked [test split](concepts.md#the-locked-test-split-and-why-it-matters) gives an unbiased final estimate.
 - **Every decision is reviewable.** Accepted *and rejected* candidates are recorded with their scores, diffs, and leakage flags.
+- **One number does not hide regressions.** Optional [per-slice scores, guard objectives, and a token-cost ledger](concepts.md#beyond-one-number-slices-guards-and-cost) surface what an aggregate averages away.
 - **Integrity failures are loud.** Leakage, degenerate eval sets, and budget overruns raise or flag; they never pass silently. Even when a run fails, the partial audit record survives on the exception.
+- **Records are built to be acted on.** [Gate a prompt in CI](concepts.md#governance-gate-verify-share) with `recension check`, detect tampering with `recension verify`, and share a standalone HTML audit with `recension report`.
 - **Compute is a dial.** Candidates per round, rounds, diagnosis depth, and a hard model-call ceiling are all caller-controlled via [`Budget`](api.md#recension.budget.Budget).
 
 ## Install
@@ -49,9 +51,11 @@ Python 3.12+. The core and the entire test suite run offline against a determini
 
 - [Use cases](use-cases.md): four real-world scenarios, from support-ticket triage to compliance audit trails.
 - [Concepts](concepts.md): how the pieces fit together, walked in run order.
+- [CLI](cli.md): `run`, `show`, `diff`, plus `check` (CI guard), `verify` (integrity), and `report` (HTML audit).
+- [Bring your own optimizer](ecosystem.md): plug DSPy, GEPA, or your own engine into the governance shell.
 - [Worked examples](examples/index.md): three end-to-end runs, each reproducible offline with no API key.
 - [API reference](api.md): generated from the docstrings.
 
 ## Prior art, honestly
 
-DSPy and GEPA own the optimization mechanics this library's `ReflectiveOptimizer` performs; if you want state-of-the-art prompt-optimization algorithms, look there. `recension`'s contribution is the **measurement and governance shell** around a text artifact: versioned artifacts with provenance, leakage detection, the complete audit record, and budgeted update-time compute. The design leaves room to delegate the optimizer internals to an external engine without changing the artifact and record abstractions.
+DSPy and GEPA own the optimization mechanics this library's `ReflectiveOptimizer` performs; if you want state-of-the-art prompt-optimization algorithms, look there. `recension`'s contribution is the **measurement and governance shell** around a text artifact: versioned artifacts with provenance, leakage detection, the complete audit record, and budgeted update-time compute. That delegation is a real seam, not a promise: the [`Proposer`](api.md#recension.proposer.Proposer) protocol lets an external engine supply the candidate edits while recension keeps owning the artifact, the measurement, and the record. See [Bring your own optimizer](ecosystem.md).

@@ -9,14 +9,107 @@ artifact (with version history) is embedded so the record stands alone.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .artifact import TextArtifact
 
-__all__ = ["CandidateRecord", "RoundRecord", "RunRecord"]
+
+def _json_safe(obj: Any) -> Any:
+    """Recursively replace non-finite floats (NaN/inf) with None.
+
+    A partial record from a run that was cut short before a score could be
+    computed carries ``float('nan')``; emitting it raw would produce invalid,
+    non-interoperable JSON. We serialize such an uncomputed score as ``null``;
+    :func:`_restore_score` maps it back on load.
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+def _restore_score(value: Any) -> float:
+    """Inverse of the NaN->null mapping for a required score field."""
+    return float("nan") if value is None else value
+
+__all__ = [
+    "CandidateRecord",
+    "GuardScore",
+    "RoundRecord",
+    "RunRecord",
+    "SignificanceRecord",
+    "SliceScore",
+]
+
+
+@dataclass(frozen=True)
+class GuardScore:
+    """A guard objective's incumbent-vs-candidate score for the best candidate.
+
+    Recorded when the optimizer runs with ``guards=[...]``, so a reviewer sees
+    why a candidate was held back (or that it cleared the guards).
+    """
+
+    name: str
+    incumbent_score: float
+    candidate_score: float
+
+    @property
+    def regressed(self) -> bool:
+        """True when the candidate scores worse than the incumbent on this guard."""
+        return self.candidate_score < self.incumbent_score
+
+
+@dataclass(frozen=True)
+class SliceScore:
+    """Baseline vs final score for one subgroup of the validation set.
+
+    Recorded per distinct value of the optimizer's ``slice_by`` metadata key, so
+    a run that improves overall but regresses a segment is visible rather than
+    averaged away.
+    """
+
+    slice: str
+    n: int
+    baseline_score: float
+    final_score: float
+
+    @property
+    def regressed(self) -> bool:
+        """True when this slice scored worse at the end than at the start."""
+        return self.final_score < self.baseline_score
+
+
+@dataclass(frozen=True)
+class SignificanceRecord:
+    """The significance test applied to a candidate's validation gain.
+
+    Recorded for the best candidate of a round when the optimizer runs with
+    ``accept_significant=True``, so a reviewer can see not just the score delta
+    but whether it cleared the confidence bar.
+
+    Attributes:
+        mean_difference: Mean per-example validation gain over the incumbent.
+        ci_low: Lower bound of the bootstrap confidence interval on the gain.
+        ci_high: Upper bound of that interval.
+        alpha: Significance level (the interval is ``1 - alpha``).
+        significant: True when the interval excludes 0 (gain significantly > 0).
+    """
+
+    mean_difference: float
+    ci_low: float
+    ci_high: float
+    alpha: float
+    significant: bool
 
 
 @dataclass(frozen=True)
@@ -37,6 +130,9 @@ class CandidateRecord:
             ``RoundRecord.train_score`` (the incumbent's train score) this
             lets a reviewer reconstruct the train-vs-validation gain that
             drove the leakage decision.
+        significance: The significance test on this candidate's validation
+            gain, populated for the round's best candidate when the run used
+            ``accept_significant``. ``None`` otherwise.
     """
 
     candidate_id: str
@@ -46,6 +142,8 @@ class CandidateRecord:
     leakage_flags: tuple[str, ...] = ()
     accepted: bool = False
     train_score: float | None = None
+    significance: SignificanceRecord | None = None
+    guard_scores: tuple[GuardScore, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,6 +160,8 @@ class RoundRecord:
     accepted_version_id: str | None
     model_calls_used: int
     elapsed_seconds: float
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass
@@ -82,6 +182,17 @@ class RunRecord:
         rounds: One :class:`RoundRecord` per executed round.
         final_version_id: Incumbent version at the end of the run.
         final_score: Held-out validation score of the final incumbent.
+        final_test_score: Score of the final incumbent on the locked test
+            split, computed exactly once; ``None`` if no test split was given.
+        test_validation_gap: ``final_score - final_test_score`` when a test
+            split exists; a large positive gap suggests the validation score
+            is optimistic (overfit to validation across rounds). ``None``
+            without a test split.
+        validation_overfit: True when ``test_validation_gap`` exceeds the
+            optimizer's ``overfit_gap`` threshold; surfaced, not hidden.
+        total_input_tokens: Total input tokens reported by the model across the
+            run (0 if the model does not report usage).
+        total_output_tokens: Total output tokens reported across the run.
         total_model_calls: All model calls spent, including judge calls.
         stopped_reason: Why the run ended (``"completed"``,
             ``"no_improvement"``, ``"budget_exceeded"``).
@@ -99,6 +210,12 @@ class RunRecord:
     rounds: list[RoundRecord] = field(default_factory=list)
     final_version_id: str = ""
     final_score: float = 0.0
+    final_test_score: float | None = None
+    test_validation_gap: float | None = None
+    validation_overfit: bool = False
+    slice_scores: list[SliceScore] = field(default_factory=list)
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
     total_model_calls: int = 0
     stopped_reason: str = ""
     started_at: str = ""
@@ -118,8 +235,8 @@ class RunRecord:
             RoundRecord(
                 round_index=r["round_index"],
                 incumbent_version_id=r["incumbent_version_id"],
-                incumbent_validation_score=r["incumbent_validation_score"],
-                train_score=r["train_score"],
+                incumbent_validation_score=_restore_score(r["incumbent_validation_score"]),
+                train_score=_restore_score(r["train_score"]),
                 failure_example_ids=tuple(r["failure_example_ids"]),
                 diagnosis=r["diagnosis"],
                 candidates=tuple(
@@ -131,12 +248,23 @@ class RunRecord:
                         leakage_flags=tuple(c["leakage_flags"]),
                         accepted=c["accepted"],
                         train_score=c.get("train_score"),
+                        significance=_significance_from_dict(c.get("significance")),
+                        guard_scores=tuple(
+                            GuardScore(
+                                name=g["name"],
+                                incumbent_score=g["incumbent_score"],
+                                candidate_score=g["candidate_score"],
+                            )
+                            for g in c.get("guard_scores", [])
+                        ),
                     )
                     for c in r["candidates"]
                 ),
                 accepted_version_id=r["accepted_version_id"],
                 model_calls_used=r["model_calls_used"],
                 elapsed_seconds=r["elapsed_seconds"],
+                input_tokens=r.get("input_tokens", 0),
+                output_tokens=r.get("output_tokens", 0),
             )
             for r in data["rounds"]
         ]
@@ -147,10 +275,24 @@ class RunRecord:
             seed=data["seed"],
             budget=data["budget"],
             baseline_version_id=data["baseline_version_id"],
-            baseline_score=data["baseline_score"],
+            baseline_score=_restore_score(data["baseline_score"]),
             rounds=rounds,
             final_version_id=data["final_version_id"],
-            final_score=data["final_score"],
+            final_score=_restore_score(data["final_score"]),
+            final_test_score=data.get("final_test_score"),
+            test_validation_gap=data.get("test_validation_gap"),
+            validation_overfit=data.get("validation_overfit", False),
+            slice_scores=[
+                SliceScore(
+                    slice=s["slice"],
+                    n=s["n"],
+                    baseline_score=s["baseline_score"],
+                    final_score=s["final_score"],
+                )
+                for s in data.get("slice_scores", [])
+            ],
+            total_input_tokens=data.get("total_input_tokens", 0),
+            total_output_tokens=data.get("total_output_tokens", 0),
             total_model_calls=data["total_model_calls"],
             stopped_reason=data["stopped_reason"],
             started_at=data["started_at"],
@@ -158,8 +300,8 @@ class RunRecord:
         )
 
     def to_json(self, *, indent: int | None = 2) -> str:
-        """Serialize to JSON."""
-        return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
+        """Serialize to JSON (valid even for partial records with uncomputed scores)."""
+        return json.dumps(_json_safe(self.to_dict()), indent=indent, ensure_ascii=False)
 
     @classmethod
     def from_json(cls, payload: str) -> RunRecord:
@@ -181,6 +323,41 @@ class RunRecord:
         """Rehydrate the embedded artifact (for diffs and inspection)."""
         return TextArtifact.from_dict(self.artifact)
 
+    # -- integrity ----------------------------------------------------------
+
+    def fingerprint(self) -> str:
+        """Deterministic SHA-256 over the canonical record JSON.
+
+        Two records with identical content produce the same fingerprint. Store
+        it (or a signature of it) somewhere trusted to detect later tampering
+        with any field; the artifact lineage is additionally self-verifiable
+        via :meth:`verify`.
+        """
+        canonical = json.dumps(_json_safe(self.to_dict()), sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def verify(self) -> list[str]:
+        """Integrity problems with the embedded artifact's version chain.
+
+        Empty when intact. Because version ids are content-addressed, this
+        catches tampering with a version's text or id without needing any
+        external reference. (Tampering with non-versioned fields such as a
+        recorded score is caught instead by comparing :meth:`fingerprint` or a
+        signature against a trusted copy.)
+        """
+        return self.restored_artifact().verify()
+
+    def sign(self, key: str) -> str:
+        """HMAC-SHA256 of the fingerprint with ``key`` (hex), for signed records."""
+        digest = hmac.new(
+            key.encode("utf-8"), self.fingerprint().encode("utf-8"), hashlib.sha256
+        )
+        return digest.hexdigest()
+
+    def verify_signature(self, key: str, signature: str) -> bool:
+        """Constant-time check that ``signature`` matches :meth:`sign` for ``key``."""
+        return hmac.compare_digest(self.sign(key), signature)
+
     def summary(self) -> str:
         """Human-readable account of the run: baseline, rounds, diffs, scores."""
         lines = [
@@ -201,7 +378,25 @@ class RunRecord:
                 score = "n/a" if c.validation_score is None else f"{c.validation_score:.4f}"
                 status = "ACCEPTED" if c.accepted else "rejected"
                 flags = f"  flags: {', '.join(c.leakage_flags)}" if c.leakage_flags else ""
-                lines.append(f"  candidate {c.candidate_id}: {score}  [{status}]{flags}")
+                sig = ""
+                if c.significance is not None:
+                    s = c.significance
+                    verdict = "significant" if s.significant else "NOT significant"
+                    sig = (
+                        f"  [{verdict}: gain {s.mean_difference:+.4f}, "
+                        f"{int((1 - s.alpha) * 100)}% CI [{s.ci_low:+.4f}, {s.ci_high:+.4f}]]"
+                    )
+                guards = ""
+                if c.guard_scores:
+                    parts = [
+                        f"{g.name} {g.incumbent_score:.4f}->{g.candidate_score:.4f}"
+                        + ("!" if g.regressed else "")
+                        for g in c.guard_scores
+                    ]
+                    guards = "  guards: " + ", ".join(parts)
+                lines.append(
+                    f"  candidate {c.candidate_id}: {score}  [{status}]{flags}{sig}{guards}"
+                )
             if r.accepted_version_id:
                 lines.append(f"  new incumbent: version {r.accepted_version_id}")
                 accepted = next((c for c in r.candidates if c.accepted), None)
@@ -218,6 +413,41 @@ class RunRecord:
             f"validation score {self.final_score:.4f}  "
             f"({self.baseline_score:.4f} -> {self.final_score:.4f})"
         )
+        if self.final_test_score is not None:
+            gap = self.test_validation_gap if self.test_validation_gap is not None else 0.0
+            warn = (
+                "  [WARNING: possible overfitting to validation]"
+                if self.validation_overfit
+                else ""
+            )
+            lines.append(
+                f"test (locked, scored once): {self.final_test_score:.4f}  "
+                f"validation/test gap {gap:.4f}{warn}"
+            )
+        if self.slice_scores:
+            lines.append("slices:")
+            for sl in self.slice_scores:
+                mark = "  [REGRESSED]" if sl.regressed else ""
+                lines.append(
+                    f"  {sl.slice} (n={sl.n}): "
+                    f"{sl.baseline_score:.4f} -> {sl.final_score:.4f}{mark}"
+                )
         lines.append(f"model calls: {self.total_model_calls}")
+        if self.total_input_tokens or self.total_output_tokens:
+            lines.append(
+                f"tokens: {self.total_input_tokens} in / {self.total_output_tokens} out"
+            )
         lines.append(f"stopped: {self.stopped_reason}")
         return "\n".join(lines)
+
+
+def _significance_from_dict(data: dict[str, Any] | None) -> SignificanceRecord | None:
+    if data is None:
+        return None
+    return SignificanceRecord(
+        mean_difference=data["mean_difference"],
+        ci_low=data["ci_low"],
+        ci_high=data["ci_high"],
+        alpha=data["alpha"],
+        significant=data["significant"],
+    )

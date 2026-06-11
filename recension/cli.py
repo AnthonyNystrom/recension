@@ -16,6 +16,7 @@ still written so the audit trail survives).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import fields
@@ -30,9 +31,10 @@ from .evalset import EvalSet
 from .exceptions import BudgetExceeded, ConfigError, LeakageDetected, RecensionError
 from .models.base import Model
 from .models.mock import MockModel
-from .objective import F1, ExactMatch, LLMJudge, Objective
-from .optimizer import ReflectiveOptimizer
+from .objective import F1, ExactMatch, LLMJudge, MaxLength, Objective
+from .optimizer import ReflectiveOptimizer, score_artifact
 from .record import RunRecord
+from .report import render_report
 
 __all__ = ["main"]
 
@@ -72,6 +74,42 @@ def _build_parser() -> argparse.ArgumentParser:
     diff.add_argument("version_a", help="version id (older)")
     diff.add_argument("version_b", help="version id (newer)")
     diff.set_defaults(func=_cmd_diff)
+
+    check = sub.add_parser(
+        "check", help="score the current artifact and fail if it regressed below a baseline"
+    )
+    check.add_argument("--config", required=True, help="path to the run config (YAML)")
+    check.add_argument(
+        "--baseline",
+        required=True,
+        help="a prior record JSON file, or a literal score, to compare against",
+    )
+    check.add_argument(
+        "--split", choices=["validation", "test"], default="validation",
+        help="which split to score on (default: validation)",
+    )
+    check.add_argument(
+        "--tolerance", type=float, default=0.0,
+        help="allowed drop below the baseline before failing (default: 0.0)",
+    )
+    check.set_defaults(func=_cmd_check)
+
+    verify = sub.add_parser("verify", help="verify a run record's integrity")
+    verify.add_argument("record", help="path to a run record JSON file")
+    verify.add_argument(
+        "--signature", help="expected HMAC signature (see RECENSION_SIGNING_KEY)"
+    )
+    verify.set_defaults(func=_cmd_verify)
+
+    report = sub.add_parser(
+        "report", help="render a standalone HTML audit report from a run record"
+    )
+    report.add_argument("record", help="path to a run record JSON file")
+    report.add_argument(
+        "-o", "--output", default="report.html",
+        help="where to write the HTML (default: report.html)",
+    )
+    report.set_defaults(func=_cmd_report)
     return parser
 
 
@@ -97,6 +135,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
         seed=None if seed is None else _coerce(int, seed, "seed"),
         min_improvement=_coerce(float, config.get("min_improvement", 1e-6), "min_improvement"),
         strict_leakage=bool(config.get("strict_leakage", False)),
+        overfit_gap=_coerce(float, config.get("overfit_gap", 0.1), "overfit_gap"),
+        accept_significant=bool(config.get("accept_significant", False)),
+        alpha=_coerce(float, config.get("alpha", 0.05), "alpha"),
+        bootstrap_resamples=_coerce(
+            int, config.get("bootstrap_resamples", 2000), "bootstrap_resamples"
+        ),
+        slice_by=config.get("slice_by"),
+        slice_tolerance=_coerce(float, config.get("slice_tolerance", 0.0), "slice_tolerance"),
+        guards=_build_guards(config.get("guards", [])),
+        guard_tolerance=_coerce(float, config.get("guard_tolerance", 0.0), "guard_tolerance"),
         on_progress=lambda line: print(line, file=sys.stderr),
     )
     try:
@@ -200,12 +248,115 @@ def _build_objective(section: dict[str, Any], model: Model) -> Objective:
     )
 
 
+def _build_guards(section: Any) -> list[Objective]:
+    """Build guard objectives from the config (currently only ``max_length``)."""
+    if not isinstance(section, list):
+        raise ConfigError("config key 'guards' must be a list")
+    guards: list[Objective] = []
+    for i, spec in enumerate(section):
+        if not isinstance(spec, dict) or "name" not in spec:
+            raise ConfigError(f"guard {i} must be a mapping with a 'name'")
+        name = spec["name"]
+        if name == "max_length":
+            guards.append(MaxLength(_coerce(int, _require(spec, "max_chars"), "max_chars")))
+        else:
+            raise ConfigError(f"unknown guard {name!r} (expected 'max_length')")
+    return guards
+
+
+# -- check (regression guard) --------------------------------------------------
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
+    config = _load_config(args.config)
+    artifact = _build_artifact(_section(config, "artifact"))
+    evalset = EvalSet.from_jsonl(_require(_section(config, "evalset"), "path"))
+    model = _build_model(_section(config, "model"))
+    objective = _build_objective(_section(config, "objective"), model)
+    examples = evalset.test if args.split == "test" else evalset.validation
+    if not examples:
+        raise ConfigError(f"the {args.split!r} split is empty; nothing to check against")
+
+    baseline = _resolve_baseline(args.baseline, args.split)
+    current = score_artifact(artifact.text, examples, objective, model)
+    floor = baseline - args.tolerance
+    print(
+        f"{args.split} score: {current:.4f}  baseline: {baseline:.4f}  "
+        f"floor: {floor:.4f} (tolerance {args.tolerance:.4f})"
+    )
+    if current < floor:
+        print(
+            f"REGRESSION: {current:.4f} is below the floor {floor:.4f}", file=sys.stderr
+        )
+        return 1
+    print("OK: no regression")
+    return 0
+
+
+def _resolve_baseline(baseline: str, split: str) -> float:
+    """A baseline is either a record file (use its final score) or a literal number."""
+    path = Path(baseline)
+    if path.exists():
+        record = RunRecord.load(path)
+        if split == "test":
+            if record.final_test_score is None:
+                raise ConfigError(
+                    f"baseline record {baseline!r} has no test score to compare against"
+                )
+            return record.final_test_score
+        return record.final_score
+    try:
+        return float(baseline)
+    except ValueError as exc:
+        raise ConfigError(
+            f"--baseline {baseline!r} is neither a record file nor a number"
+        ) from exc
+
+
+# -- verify (integrity) --------------------------------------------------------
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    record = _load_record(args.record)
+    problems = record.verify()
+    if args.signature is not None:
+        key = os.environ.get("RECENSION_SIGNING_KEY")
+        if not key:
+            raise ConfigError(
+                "--signature given but RECENSION_SIGNING_KEY is not set in the environment"
+            )
+        if not record.verify_signature(key, args.signature):
+            problems.append("HMAC signature does not match (record was altered or wrong key)")
+    if problems:
+        print("integrity: FAILED", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 2
+    print(f"integrity: verified  (fingerprint {record.fingerprint()[:16]})")
+    return 0
+
+
+# -- report (HTML audit) -------------------------------------------------------
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    record = _load_record(args.record)
+    Path(args.output).write_text(render_report(record), encoding="utf-8")
+    print(f"audit report written to {args.output}")
+    return 0
+
+
 # -- show / diff ---------------------------------------------------------------
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
     record = _load_record(args.record)
     print(record.summary())
+    problems = record.verify()
+    if problems:
+        print(f"integrity: FAILED ({len(problems)} problem(s); run `recension verify`)")
+    else:
+        print(f"integrity: verified (fingerprint {record.fingerprint()[:16]})")
     return 0
 
 

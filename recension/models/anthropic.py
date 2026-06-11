@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import Message
+from .base import Message, TokenUsage
 
 __all__ = ["AnthropicModel"]
 
@@ -62,11 +62,17 @@ class AnthropicModel:
         self.send_temperature = send_temperature
         self._client = anthropic.Anthropic(max_retries=max_retries)
         self._calls = 0
+        self._last_usage = TokenUsage()
 
     @property
     def call_count(self) -> int:
         """Number of ``complete`` calls made on this instance."""
         return self._calls
+
+    @property
+    def last_usage(self) -> TokenUsage:
+        """Token usage of the last call, read from the API response."""
+        return self._last_usage
 
     def complete(
         self,
@@ -93,6 +99,11 @@ class AnthropicModel:
         if should_send_temperature(self.model, self.send_temperature):
             kwargs["temperature"] = temperature
         response = self._client.messages.create(**kwargs)
+        usage = getattr(response, "usage", None)
+        self._last_usage = TokenUsage(
+            getattr(usage, "input_tokens", 0) or 0,
+            getattr(usage, "output_tokens", 0) or 0,
+        )
         return "".join(
             block.text for block in response.content if getattr(block, "type", "") == "text"
         )

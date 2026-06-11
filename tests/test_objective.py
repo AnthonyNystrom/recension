@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from recension import F1, DegenerateEvalError, ExactMatch, Example, LLMJudge
+from recension import F1, DegenerateEvalError, ExactMatch, Example, LLMJudge, MaxLength
 from recension.models.base import Message
 
 
@@ -76,6 +76,21 @@ class TestF1:
 
     def test_one_empty(self) -> None:
         assert F1().score("", ex()) == 0.0
+
+
+class TestMaxLength:
+    def test_within_and_over_limit(self) -> None:
+        guard = MaxLength(5)
+        assert guard.score("abc", ex()) == 1.0
+        assert guard.score("abcdef", ex()) == 0.0
+
+    def test_name_and_not_model_graded(self) -> None:
+        guard = MaxLength(80)
+        assert guard.name == "max_length(80)"
+        assert guard.model_graded is False
+
+    def test_aggregate_is_fraction_within_limit(self) -> None:
+        assert MaxLength(5).aggregate([1.0, 0.0, 1.0, 1.0]) == 0.75
 
 
 class TestLLMJudge:

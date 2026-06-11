@@ -138,6 +138,24 @@ def test_json_roundtrip_preserves_everything() -> None:
     assert restored.history() == artifact.history()
 
 
+def test_verify_passes_on_intact_history() -> None:
+    artifact = make_artifact()
+    artifact.commit("Second.\n", Provenance(diagnosis="d"))
+    assert artifact.verify() == []
+
+
+def test_verify_catches_tampered_text() -> None:
+    artifact = make_artifact()
+    artifact.commit("Second.\n", Provenance(diagnosis="d"))
+    # Forge: change a version's text but leave its content-addressed id.
+    data = artifact.to_dict()
+    data["versions"][1]["text"] = "Tampered.\n"
+    forged = TextArtifact.from_dict(data)
+    problems = forged.verify()
+    assert problems
+    assert "does not match its content hash" in problems[0]
+
+
 def test_from_file(tmp_path: Path) -> None:
     p = tmp_path / "prompt.txt"
     p.write_text("From a file.\n", encoding="utf-8")

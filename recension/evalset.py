@@ -1,9 +1,13 @@
-"""Held-out evaluation data: examples with an explicit train/validation split.
+"""Held-out evaluation data: examples with an explicit train/validation split,
+and an optional locked test split.
 
 The split is the integrity backbone of the whole library: the optimizer
 diagnoses failures on ``train`` and accepts candidates only on ``validation``.
-:class:`EvalSet` enforces the separation at construction time and fails loud
-on anything that would corrupt the acceptance signal.
+An optional ``test`` split is never touched during optimization and is scored
+exactly once at the end, giving an unbiased estimate that is not subject to the
+multiple-comparisons bias of selecting on ``validation`` across many rounds.
+:class:`EvalSet` enforces the separation at construction time and fails loud on
+anything that would corrupt the acceptance signal.
 """
 
 from __future__ import annotations
@@ -41,31 +45,46 @@ class Example:
 
 
 class EvalSet:
-    """Examples partitioned into ``train`` and ``validation``.
+    """Examples partitioned into ``train``, ``validation``, and optional ``test``.
 
     Raises:
-        DegenerateEvalError: If either split is empty, an id is duplicated
-            within a split, or an id appears in both splits.
+        DegenerateEvalError: If ``train`` or ``validation`` is empty, an id is
+            duplicated within a split, or an id appears in more than one split.
     """
 
-    def __init__(self, train: Sequence[Example], validation: Sequence[Example]) -> None:
+    def __init__(
+        self,
+        train: Sequence[Example],
+        validation: Sequence[Example],
+        test: Sequence[Example] | None = None,
+    ) -> None:
         if not train:
             raise DegenerateEvalError("train split is empty")
         if not validation:
             raise DegenerateEvalError("validation split is empty")
+        test = test or ()
         train_ids = [e.id for e in train]
         val_ids = [e.id for e in validation]
-        for label, ids in (("train", train_ids), ("validation", val_ids)):
+        test_ids = [e.id for e in test]
+        for label, ids in (("train", train_ids), ("validation", val_ids), ("test", test_ids)):
             if len(set(ids)) != len(ids):
                 raise DegenerateEvalError(f"duplicate example ids in {label} split")
-        overlap = set(train_ids) & set(val_ids)
-        if overlap:
-            raise DegenerateEvalError(
-                f"example ids appear in both splits (would contaminate acceptance): "
-                f"{sorted(overlap)}"
-            )
+        # Every pair of splits must be disjoint: a shared id would let an edit
+        # "improve" on data it was also diagnosed or accepted on.
+        for a_label, a_ids, b_label, b_ids in (
+            ("train", train_ids, "validation", val_ids),
+            ("train", train_ids, "test", test_ids),
+            ("validation", val_ids, "test", test_ids),
+        ):
+            overlap = set(a_ids) & set(b_ids)
+            if overlap:
+                raise DegenerateEvalError(
+                    f"example ids appear in both {a_label} and {b_label} splits "
+                    f"(would contaminate the held-out signal): {sorted(overlap)}"
+                )
         self._train = tuple(train)
         self._validation = tuple(validation)
+        self._test = tuple(test)
 
     @property
     def train(self) -> tuple[Example, ...]:
@@ -77,20 +96,25 @@ class EvalSet:
         """Held-out examples used to accept or reject candidates."""
         return self._validation
 
+    @property
+    def test(self) -> tuple[Example, ...]:
+        """Locked examples scored once at the end; empty if none were supplied."""
+        return self._test
+
     @classmethod
     def from_records(cls, records: Iterable[Mapping[str, Any]]) -> EvalSet:
         """Build an eval set from dict records.
 
-        Each record needs ``id``, ``input``, and ``split`` (``"train"`` or
-        ``"validation"``), plus optional ``expected`` and ``rubric``. Unknown
-        keys land in :attr:`Example.metadata`.
+        Each record needs ``id``, ``input``, and ``split`` (``"train"``,
+        ``"validation"``, or the optional ``"test"``), plus optional
+        ``expected`` and ``rubric``. Unknown keys land in
+        :attr:`Example.metadata`.
 
         Raises:
             DegenerateEvalError: On a missing key, an unknown split value, or
                 any split-integrity violation.
         """
-        train: list[Example] = []
-        validation: list[Example] = []
+        buckets: dict[str, list[Example]] = {"train": [], "validation": [], "test": []}
         for i, record in enumerate(records):
             try:
                 example_id = str(record["id"])
@@ -98,23 +122,21 @@ class EvalSet:
                 split = record["split"]
             except KeyError as exc:
                 raise DegenerateEvalError(f"record {i} is missing required key {exc}") from exc
-            example = Example(
-                id=example_id,
-                input=example_input,
-                expected=None if record.get("expected") is None else str(record["expected"]),
-                rubric=None if record.get("rubric") is None else str(record["rubric"]),
-                metadata={k: v for k, v in record.items() if k not in _KNOWN_KEYS},
-            )
-            if split == "train":
-                train.append(example)
-            elif split == "validation":
-                validation.append(example)
-            else:
+            if split not in buckets:
                 raise DegenerateEvalError(
                     f"record {example_id!r} has unknown split {split!r} "
-                    "(expected 'train' or 'validation')"
+                    "(expected 'train', 'validation', or 'test')"
                 )
-        return cls(train, validation)
+            buckets[split].append(
+                Example(
+                    id=example_id,
+                    input=example_input,
+                    expected=None if record.get("expected") is None else str(record["expected"]),
+                    rubric=None if record.get("rubric") is None else str(record["rubric"]),
+                    metadata={k: v for k, v in record.items() if k not in _KNOWN_KEYS},
+                )
+            )
+        return cls(buckets["train"], buckets["validation"], buckets["test"])
 
     @classmethod
     def from_jsonl(cls, path: str | Path) -> EvalSet:
@@ -138,4 +160,7 @@ class EvalSet:
         return cls.from_records(records)
 
     def __repr__(self) -> str:
-        return f"EvalSet(train={len(self._train)}, validation={len(self._validation)})"
+        return (
+            f"EvalSet(train={len(self._train)}, validation={len(self._validation)}, "
+            f"test={len(self._test)})"
+        )

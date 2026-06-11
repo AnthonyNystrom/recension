@@ -6,6 +6,7 @@ Everything runs against scripted MockModels — no network, fully deterministic.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 import pytest
 
@@ -16,6 +17,7 @@ from recension import (
     ExactMatch,
     LeakageDetected,
     LLMJudge,
+    MaxLength,
     ReflectiveOptimizer,
     RunRecord,
     TextArtifact,
@@ -37,6 +39,23 @@ def sentiment_evalset() -> EvalSet:
             {"id": "v1", "input": "I hate waiting", "expected": "negative", "split": "validation"},
             {"id": "v2", "input": "wonderful place", "expected": "positive", "split": "validation"},
             {"id": "v3", "input": "awful noise", "expected": "negative", "split": "validation"},
+        ]
+    )
+
+
+def sentiment_evalset_with_test() -> EvalSet:
+    # The two test examples contain no sentiment keywords, so the scripted mock
+    # mislabels them: the locked test score lands well below validation.
+    return EvalSet.from_records(
+        [
+            {"id": "t1", "input": "I love this thing", "expected": "positive", "split": "train"},
+            {"id": "t2", "input": "this is terrible", "expected": "negative", "split": "train"},
+            {"id": "t3", "input": "what a great day", "expected": "positive", "split": "train"},
+            {"id": "v1", "input": "I hate waiting", "expected": "negative", "split": "validation"},
+            {"id": "v2", "input": "wonderful place", "expected": "positive", "split": "validation"},
+            {"id": "v3", "input": "awful noise", "expected": "negative", "split": "validation"},
+            {"id": "x1", "input": "meh whatever", "expected": "positive", "split": "test"},
+            {"id": "x2", "input": "fine i guess", "expected": "negative", "split": "test"},
         ]
     )
 
@@ -166,6 +185,31 @@ class TestEndToEnd:
         assert "round 2: reusing cached incumbent train score" in joined
         assert "round 2: scoring incumbent on train" not in joined
 
+    def test_no_test_split_leaves_test_fields_unset(self) -> None:
+        record = run_sentiment()
+        assert record.final_test_score is None
+        assert record.test_validation_gap is None
+        assert record.validation_overfit is False
+        assert "test (locked" not in record.summary()
+
+    def test_locked_test_split_scored_once_and_overfit_flagged(self) -> None:
+        record = ReflectiveOptimizer(
+            artifact=TextArtifact.from_text("Label the sentiment of the message.", name="clf"),
+            evalset=sentiment_evalset_with_test(),
+            objective=ExactMatch(),
+            model=MockModel(script=sentiment_script),
+            budget=Budget(candidates_per_round=4, rounds=2, diagnosis_depth=2),
+            seed=7,
+        ).run()
+        assert record.final_score == 1.0          # validation: the fix labels these correctly
+        assert record.final_test_score == 0.0     # locked test: mislabeled, scored once
+        assert record.test_validation_gap == 1.0
+        assert record.validation_overfit is True
+        assert RunRecord.from_json(record.to_json()) == record
+        summary = record.summary()
+        assert "test (locked, scored once): 0.0000" in summary
+        assert "overfitting to validation" in summary
+
     def test_record_serialization_roundtrip(self) -> None:
         record = run_sentiment()
         assert RunRecord.from_json(record.to_json()) == record
@@ -183,6 +227,32 @@ class TestEndToEnd:
 
 
 class TestBudget:
+    def test_budget_exhausted_before_test_split_skips_it_not_fails(self) -> None:
+        # A run that completes the loop but cannot afford to score the locked
+        # test split must return its completed record (test skipped), not throw
+        # a budget failure that discards the run.
+        evalset = sentiment_evalset_with_test()
+
+        def run(budget: Budget) -> RunRecord:
+            return ReflectiveOptimizer(
+                artifact=TextArtifact.from_text("Label the sentiment of the message.", name="clf"),
+                evalset=evalset,
+                objective=ExactMatch(),
+                model=MockModel(script=sentiment_script),
+                budget=budget,
+                seed=7,
+            ).run()
+
+        full = run(Budget(candidates_per_round=4, rounds=2, diagnosis_depth=2))
+        assert full.final_test_score is not None  # unbounded: the test split is scored
+        loop_calls = full.total_model_calls - len(evalset.test)
+        tight = run(
+            Budget(candidates_per_round=4, rounds=2, diagnosis_depth=2, max_model_calls=loop_calls)
+        )
+        assert tight.stopped_reason in ("completed", "no_improvement")  # the loop finished
+        assert tight.final_test_score is None  # test split skipped, no exception
+        assert tight.validation_overfit is False
+
     def test_max_model_calls_raises_with_partial_record(self) -> None:
         optimizer = ReflectiveOptimizer(
             artifact=TextArtifact.from_text("Label the sentiment.", name="clf"),
@@ -372,6 +442,167 @@ class TestLeakage:
         assert round1.accepted_version_id is not None
         accepted = next(c for c in round1.candidates if c.accepted)
         assert any("implausible_gain" in flag for flag in accepted.leakage_flags)
+
+
+def one_flip_evalset() -> EvalSet:
+    return EvalSet.from_records(
+        [
+            {"id": "t1", "input": "train one", "expected": "yes", "split": "train"},
+            {"id": "v1", "input": "val one", "expected": "yes", "split": "validation"},
+            {"id": "v2", "input": "val two", "expected": "yes", "split": "validation"},
+            {"id": "v3", "input": "val three", "expected": "yes", "split": "validation"},
+        ]
+    )
+
+
+def make_flip_script(fix_marker: str, n_correct: int) -> Callable[[list[Message]], str]:
+    """A scripted model whose single candidate fixes the first n validation examples."""
+    correct_inputs = ["val one", "val two", "val three"][:n_correct]
+
+    def script(messages: list[Message]) -> str:
+        system = next((m["content"] for m in messages if m["role"] == "system"), "")
+        user = next(m["content"] for m in messages if m["role"] == "user")
+        if system.startswith("You analyze why"):
+            return "the prompt is too vague"
+        if system.startswith("You revise text artifacts"):
+            return f"<revised_artifact>\n{fix_marker}\n</revised_artifact>"
+        return "yes" if (fix_marker in system and user in correct_inputs) else "no"
+
+    return script
+
+
+class TestSignificanceGate:
+    def test_gate_rejects_a_noise_level_win(self) -> None:
+        # The candidate flips exactly 1 of 3 validation examples: aggregate gain
+        # 0.33 clears min_improvement, but the per-example gain is not significant.
+        record = ReflectiveOptimizer(
+            artifact=TextArtifact.from_text("start", name="a"),
+            evalset=one_flip_evalset(),
+            objective=ExactMatch(),
+            model=MockModel(script=make_flip_script("PARTIAL FIX", 1)),
+            budget=Budget(candidates_per_round=1, rounds=1),
+            seed=3,
+            accept_significant=True,
+        ).run()
+        round1 = record.rounds[0]
+        assert round1.accepted_version_id is None  # rejected despite beating the margin
+        candidate = round1.candidates[0]
+        assert candidate.validation_score == pytest.approx(1 / 3)
+        assert candidate.significance is not None
+        assert candidate.significance.significant is False
+        assert "NOT significant" in record.summary()
+
+    def test_same_win_is_accepted_without_the_gate(self) -> None:
+        # Identical scenario, gate off: the epsilon rule accepts the noisy win.
+        record = ReflectiveOptimizer(
+            artifact=TextArtifact.from_text("start", name="a"),
+            evalset=one_flip_evalset(),
+            objective=ExactMatch(),
+            model=MockModel(script=make_flip_script("PARTIAL FIX", 1)),
+            budget=Budget(candidates_per_round=1, rounds=1),
+            seed=3,
+            accept_significant=False,
+        ).run()
+        assert record.rounds[0].accepted_version_id is not None
+        assert record.rounds[0].candidates[0].significance is None  # not computed when off
+
+    def test_gate_accepts_a_clear_significant_win(self) -> None:
+        record = ReflectiveOptimizer(
+            artifact=TextArtifact.from_text("start", name="a"),
+            evalset=one_flip_evalset(),
+            objective=ExactMatch(),
+            model=MockModel(script=make_flip_script("FULL FIX", 3)),
+            budget=Budget(candidates_per_round=1, rounds=1),
+            seed=3,
+            accept_significant=True,
+        ).run()
+        accepted = [c for r in record.rounds for c in r.candidates if c.accepted]
+        assert len(accepted) == 1
+        assert accepted[0].significance is not None
+        assert accepted[0].significance.significant is True
+        assert RunRecord.from_json(record.to_json()) == record
+
+
+class TestCostLedger:
+    def test_run_records_token_totals(self) -> None:
+        record = run_sentiment()
+        assert record.total_input_tokens > 0
+        assert record.total_output_tokens > 0
+        # Per-round tokens sum to the run total (no double counting, no leaks).
+        assert sum(r.input_tokens for r in record.rounds) <= record.total_input_tokens
+        assert "tokens:" in record.summary()
+        assert RunRecord.from_json(record.to_json()) == record
+
+
+class TestSlices:
+    def _evalset(self) -> EvalSet:
+        return EvalSet.from_records(
+            [
+                {"id": "t1", "input": "I love this thing", "expected": "positive",
+                 "split": "train", "domain": "product"},
+                {"id": "t2", "input": "this is terrible", "expected": "negative",
+                 "split": "train", "domain": "product"},
+                {"id": "v1", "input": "I hate waiting", "expected": "negative",
+                 "split": "validation", "domain": "service"},
+                {"id": "v2", "input": "wonderful place", "expected": "positive",
+                 "split": "validation", "domain": "product"},
+                {"id": "v3", "input": "awful noise", "expected": "negative",
+                 "split": "validation", "domain": "service"},
+            ]
+        )
+
+    def test_slice_scores_recorded_per_subgroup(self) -> None:
+        record = ReflectiveOptimizer(
+            artifact=TextArtifact.from_text("Label the sentiment of the message.", name="clf"),
+            evalset=self._evalset(),
+            objective=ExactMatch(),
+            model=MockModel(script=sentiment_script),
+            budget=Budget(candidates_per_round=4, rounds=1, diagnosis_depth=2),
+            seed=7,
+            slice_by="domain",
+        ).run()
+        by_name = {s.slice: s for s in record.slice_scores}
+        assert set(by_name) == {"product", "service"}
+        assert by_name["service"].n == 2
+        assert by_name["product"].baseline_score == 0.0
+        assert by_name["product"].final_score == 1.0
+        assert not by_name["product"].regressed
+        assert RunRecord.from_json(record.to_json()) == record
+
+    def test_no_slice_by_means_no_slice_scores(self) -> None:
+        assert run_sentiment().slice_scores == []
+
+
+class TestGuards:
+    def _optimizer(self, guard_chars: int) -> ReflectiveOptimizer:
+        return ReflectiveOptimizer(
+            artifact=TextArtifact.from_text("Label the sentiment of the message.", name="clf"),
+            evalset=sentiment_evalset(),
+            objective=ExactMatch(),
+            model=MockModel(script=sentiment_script),
+            budget=Budget(candidates_per_round=4, rounds=1, diagnosis_depth=2),
+            seed=7,
+            guards=[MaxLength(guard_chars)],
+        )
+
+    def test_guard_rejects_a_candidate_that_regresses_length(self) -> None:
+        # Baseline outputs "neutral" (7 chars); the fix outputs 8-char labels.
+        # MaxLength(7): incumbent guard 1.0, candidate guard 0.0 -> rejected.
+        record = self._optimizer(7).run()
+        round1 = record.rounds[0]
+        assert round1.accepted_version_id is None  # primary improved but guard regressed
+        guarded = next(c for c in round1.candidates if c.guard_scores)
+        guard = guarded.guard_scores[0]
+        assert guard.incumbent_score == 1.0
+        assert guard.candidate_score == 0.0
+        assert guard.regressed
+
+    def test_guard_allows_a_candidate_within_the_limit(self) -> None:
+        # MaxLength(8): both incumbent and candidate stay within the limit.
+        record = self._optimizer(8).run()
+        accepted = [c for r in record.rounds for c in r.candidates if c.accepted]
+        assert len(accepted) == 1
+        assert accepted[0].guard_scores[0].candidate_score == 1.0
 
 
 class TestProgress:

@@ -61,4 +61,5 @@ nav:
       - Context template: examples/generated/context_template.md
       - Skill / instruction file: examples/generated/skill_file.md
   - CLI: cli.md
+  - Bring your own optimizer: ecosystem.md
   - API reference: api.md

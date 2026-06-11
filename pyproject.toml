@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "recension"
-version = "0.1.0"
+version = "0.5.0"
 description = "Measured optimization of the text layer around a language model: versioned artifacts, held-out evaluation, leakage detection, and a complete audit record."
 readme = "README.md"
 requires-python = ">=3.12"
